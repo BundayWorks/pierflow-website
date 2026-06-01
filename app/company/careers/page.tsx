@@ -44,7 +44,7 @@ export default function CareersPage() {
                 {r.body}
               </p>
               <a
-                href="mailto:careers@pierflow.ng"
+                href="mailto:careers@pierflow.com"
                 className="mt-4 inline-block text-[13px] text-accent-teal hover:underline"
               >
                 Apply →

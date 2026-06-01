@@ -22,7 +22,7 @@ export default function GetStarted() {
           </div>
 
           <form
-            action="mailto:research@pierflow.ng"
+            action="mailto:research@pierflow.com"
             method="post"
             encType="text/plain"
             className="bg-white rounded-[20px] shadow-[0_30px_80px_-30px_rgba(0,0,0,0.3)] p-6 md:p-7"

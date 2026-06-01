@@ -26,12 +26,12 @@ export const metadata: Metadata = {
   title: "Pierflow — The connectivity layer for healthcare in Africa",
   description:
     "AI-native health data infrastructure. Move data, coverage, payments, records, and referrals across every player in African healthcare.",
-  metadataBase: new URL("https://pierflow.ng"),
+  metadataBase: new URL("https://www.pierflow.com"),
   openGraph: {
     title: "Pierflow",
     description:
       "The connectivity layer for healthcare in Africa. AI-native API-first health data infrastructure.",
-    url: "https://pierflow.ng",
+    url: "https://www.pierflow.com",
     siteName: "Pierflow",
     type: "website",
   },

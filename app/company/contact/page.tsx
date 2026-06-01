@@ -11,7 +11,7 @@ export default function ContactPage() {
       <section className="bg-white">
         <div className="max-w-[640px] mx-auto px-6 py-20">
           <form
-            action="mailto:research@pierflow.ng"
+            action="mailto:research@pierflow.com"
             method="post"
             encType="text/plain"
             className="space-y-5"
@@ -40,10 +40,10 @@ export default function ContactPage() {
           <div className="mt-12 pt-8 border-t border-[#eee] text-[14px] text-textl-secondary">
             Or email{" "}
             <a
-              href="mailto:research@pierflow.ng"
+              href="mailto:research@pierflow.com"
               className="text-accent-teal hover:underline"
             >
-              research@pierflow.ng
+              research@pierflow.com
             </a>
           </div>
         </div>

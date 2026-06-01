@@ -21,7 +21,7 @@ export default function Page() {
         },
         {
           heading: "Contact",
-          text: "Email privacy@pierflow.ng for any privacy-related question.",
+          text: "Email privacy@pierflow.com for any privacy-related question.",
         },
       ]}
     />

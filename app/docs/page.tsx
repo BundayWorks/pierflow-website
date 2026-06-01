@@ -22,14 +22,14 @@ export default function DocsHome() {
               Sandbox
             </td>
             <td className="px-4 py-2.5 font-mono">
-              https://api.sandbox.pierflow.ng
+              https://api.sandbox.pierflow.com
             </td>
           </tr>
           <tr>
             <td className="px-4 py-2.5 font-mono text-textl-secondary bg-[#fafafa]">
               Production
             </td>
-            <td className="px-4 py-2.5 font-mono">https://api.pierflow.ng</td>
+            <td className="px-4 py-2.5 font-mono">https://api.pierflow.com</td>
           </tr>
         </tbody>
       </table>
@@ -40,7 +40,7 @@ export default function DocsHome() {
       <div className="mt-4">
         <CodeBlock filename="curl">
           <code>
-            curl https://api.sandbox.pierflow.ng/v1/plans \{"\n"}
+            curl https://api.sandbox.pierflow.com/v1/plans \{"\n"}
             {"  "}-H &quot;Authorization: Bearer $PIERFLOW_KEY&quot;
           </code>
         </CodeBlock>
