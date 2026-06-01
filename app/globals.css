@@ -3,25 +3,182 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #ffffff;
+  color: #0a1f1b;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.dot-grid-bg {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(255, 255, 255, 0.06) 1px,
+    transparent 0
+  );
+  background-size: 24px 24px;
+}
+
+/* Solid utility-class gradients (bake-in to bypass any Tailwind JIT issues) */
+.bg-hero-gradient {
+  background-image: linear-gradient(
+    135deg,
+    #042520 0%,
+    #063a33 25%,
+    #0a7c6e 60%,
+    #0dce9a 90%,
+    #7ae7c7 100%
+  );
+}
+.bg-cta-gradient {
+  background-image: linear-gradient(
+    135deg,
+    #063a33 0%,
+    #0a7c6e 35%,
+    #0dce9a 75%,
+    #7ae7c7 100%
+  );
+}
+.bg-card-mint {
+  background-image: linear-gradient(
+    135deg,
+    #e6fbf3 0%,
+    #d6f5ec 50%,
+    #c9efe2 100%
+  );
+}
+.bg-card-sky {
+  background-image: linear-gradient(
+    135deg,
+    #e8f6fb 0%,
+    #ddf1fa 50%,
+    #d2ebf8 100%
+  );
+}
+
+/* Faint wavy lines like Plaid's hero background */
+.wave-bg {
+  background-image:
+    radial-gradient(
+      ellipse 80% 60% at 50% 0%,
+      rgba(255, 255, 255, 0.18) 0%,
+      transparent 60%
+    ),
+    repeating-linear-gradient(
+      120deg,
+      rgba(255, 255, 255, 0.05) 0px,
+      rgba(255, 255, 255, 0.05) 1px,
+      transparent 1px,
+      transparent 14px
+    );
+}
+
+.wave-bg-light {
+  background-image: repeating-linear-gradient(
+    120deg,
+    rgba(10, 124, 110, 0.04) 0px,
+    rgba(10, 124, 110, 0.04) 1px,
+    transparent 1px,
+    transparent 16px
+  );
+}
+
+pre::-webkit-scrollbar {
+  height: 6px;
+}
+pre::-webkit-scrollbar-thumb {
+  background: #222;
+  border-radius: 3px;
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  .text-gradient {
+    background: linear-gradient(
+      90deg,
+      #d1ff9a 0%,
+      #a8f2a1 25%,
+      #7ae7c7 55%,
+      #ffffff 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    /* fallback color in case background-clip fails to render */
+    -webkit-text-fill-color: transparent;
+  }
+  .text-gradient-dark {
+    background: linear-gradient(90deg, #0a7c6e 0%, #0dce9a 40%, #048b68 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Plaid-style pill button with gradient border ring */
+  .pill-btn-dark {
+    background: #0a1f1b;
+    color: #ffffff;
+    border-radius: 9999px;
+    padding: 12px 22px;
+    font-weight: 500;
+    font-size: 14px;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: transform 0.15s ease;
+  }
+  .pill-btn-dark:hover {
+    transform: translateY(-1px);
+  }
+  .pill-btn-light {
+    background: #ffffff;
+    color: #0a1f1b;
+    border-radius: 9999px;
+    padding: 12px 22px;
+    font-weight: 500;
+    font-size: 14px;
+    border: 1px solid rgba(10, 31, 27, 0.12);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: transform 0.15s ease;
+  }
+  .pill-btn-light:hover {
+    transform: translateY(-1px);
+  }
+  /* gradient-ring around buttons (Plaid trademark) */
+  .gradient-ring {
+    position: relative;
+    isolation: isolate;
+  }
+  .gradient-ring::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: 9999px;
+    padding: 2px;
+    background: linear-gradient(
+      90deg,
+      #a8f2a1,
+      #7ae7c7,
+      #5be9e0,
+      #0dce9a,
+      #a8f2a1
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    z-index: -1;
   }
 }
