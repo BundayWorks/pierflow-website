@@ -120,10 +120,13 @@ export default function CompanyPage() {
           <h2 className="mt-4 text-[28px] md:text-[34px] font-medium leading-[1.2] text-white">
             What we believe.
           </h2>
-          <ol className="mt-10 space-y-8">
+          <ol className="mt-10 space-y-8 max-w-[760px]">
             {MANIFESTO.map((line, i) => (
-              <li key={i} className="flex gap-6">
-                <span className="font-mono text-[12px] text-accent-green pt-1 w-8 shrink-0">
+              <li
+                key={i}
+                className="grid grid-cols-[44px_1fr] items-baseline gap-x-4"
+              >
+                <span className="font-mono text-[12px] text-accent-green leading-[1.6]">
                   {String(i + 1).padStart(2, "0")}
                 </span>
                 <p className="text-[16px] md:text-[17px] leading-[1.6] text-textd-tealish">

@@ -11,7 +11,7 @@ export default function RequestAccessPage() {
       <section className="bg-white">
         <div className="max-w-[640px] mx-auto px-6 py-20">
           <form
-            action="mailto:research@pierflow.com"
+            action="mailto:pierflowllc@gmail.com"
             method="post"
             encType="text/plain"
             className="space-y-5"

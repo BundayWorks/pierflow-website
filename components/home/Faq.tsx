@@ -21,10 +21,6 @@ const FAQS = [
     a: "Every API response is scored at the boundary. Fraud, identity, lapse, eligibility, value — inline with the data, auditable, and explainable. The platform doesn't just move data, it understands it.",
   },
   {
-    q: "Which HMOs and partners are live?",
-    a: "Seven HMOs are connected today (Clearline, Bastion, Reliance, Total Health Trust and others), with new connectors continuously rolled out. On the partner side, Pierflow ships into fintechs, HR platforms, and hospitals across Nigeria.",
-  },
-  {
     q: "How long does integration take?",
     a: "Under 48 hours from sandbox to first production transaction for a typical partner.",
   },
