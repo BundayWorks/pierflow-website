@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import { Inter, Inter_Tight, JetBrains_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
-import Nav from "@/components/layout/Nav";
-import Footer from "@/components/layout/Footer";
+import {
+  ConditionalNav,
+  ConditionalFooter,
+  ConditionalMainPadding,
+} from "@/components/layout/ConditionalChrome";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -48,9 +51,9 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${interTight.variable} ${jetbrains.variable} font-sans antialiased bg-white text-textl-primary`}
       >
-        <Nav />
-        <main className="pt-[84px]">{children}</main>
-        <Footer />
+        <ConditionalNav />
+        <ConditionalMainPadding>{children}</ConditionalMainPadding>
+        <ConditionalFooter />
         <Script id="ms-clarity" strategy="afterInteractive">
           {`(function(c,l,a,r,i,t,y){
             c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
