@@ -53,3 +53,33 @@ export async function listRecentBatches() {
     },
   });
 }
+
+/**
+ * Resolve a single batch the caller is allowed to see, together with
+ * the jobs that have been ingested into it. Used by the capture page on
+ * resume / refresh so the queue persists across reloads.
+ */
+export async function getBatchForCapture(batchId: string) {
+  const ctx = await requireSessionContext();
+  return db.scanBatch.findFirst({
+    where: { id: batchId, organizationId: ctx.organization.id },
+    select: {
+      id: true,
+      label: true,
+      priority: true,
+      createdAt: true,
+      jobs: {
+        orderBy: { createdAt: "desc" },
+        take: 100,
+        select: {
+          id: true,
+          status: true,
+          recordTypeHint: true,
+          sourceAsset: true,
+          sourceFilename: true,
+          createdAt: true,
+        },
+      },
+    },
+  });
+}

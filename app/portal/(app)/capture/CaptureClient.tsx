@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import {
   Camera,
   CheckCircle2,
@@ -9,7 +16,7 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
-import { createBatch } from "./actions";
+import { createBatch, getBatchForCapture } from "./actions";
 
 /* ── Domain types ────────────────────────────────────────────── */
 
@@ -44,13 +51,23 @@ type RecentBatch = {
 
 type QueueItem = {
   id: string;
-  file: File;
+  /** Only present for items captured in this session. */
+  file?: File;
+  /** Local object URL for fresh captures, Cloudinary URL for resumed jobs. */
   previewUrl: string;
   documentType: DocumentType;
-  status: "pending" | "uploading" | "uploaded" | "failed";
+  status:
+    | "pending"
+    | "uploading"
+    | "registering"
+    | "uploaded"
+    | "failed";
   progress: number;
   cloudinaryPublicId?: string;
+  jobId?: string;
   errorMessage?: string;
+  /** Server-side job id (when hydrated from DB on resume). */
+  fromServer?: boolean;
 };
 
 /* ── Sign + upload ───────────────────────────────────────────── */
@@ -78,11 +95,52 @@ async function fetchSignature(batchId: string): Promise<SignResponse> {
   return res.json();
 }
 
+type CloudinaryUploadResult = {
+  public_id: string;
+  secure_url: string;
+  format?: string;
+  bytes?: number;
+  width?: number;
+  height?: number;
+  version?: number | string;
+};
+
+async function registerIngest(input: {
+  batchId: string;
+  source: CloudinaryUploadResult;
+  filename?: string;
+  documentType: DocumentType;
+}) {
+  const res = await fetch("/v1/ingest/documents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      batchId: input.batchId,
+      filename: input.filename,
+      documentType: input.documentType,
+      source: {
+        publicId: input.source.public_id,
+        secureUrl: input.source.secure_url,
+        format: input.source.format,
+        bytes: input.source.bytes,
+        width: input.source.width,
+        height: input.source.height,
+        version: input.source.version,
+      },
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Ingest endpoint failed: ${res.status} ${detail}`);
+  }
+  return res.json() as Promise<{ job_id: string }>;
+}
+
 function uploadToCloudinary(
   file: File,
   sig: SignResponse,
   onProgress: (pct: number) => void,
-): Promise<{ public_id: string; secure_url: string }> {
+): Promise<CloudinaryUploadResult> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
     form.append("file", file);
@@ -101,7 +159,7 @@ function uploadToCloudinary(
       try {
         const body = JSON.parse(xhr.responseText);
         if (xhr.status >= 200 && xhr.status < 300) {
-          resolve({ public_id: body.public_id, secure_url: body.secure_url });
+          resolve(body as CloudinaryUploadResult);
         } else {
           reject(new Error(body?.error?.message ?? `HTTP ${xhr.status}`));
         }
@@ -133,9 +191,48 @@ export default function CaptureClient({
     [recentBatches, activeBatchId],
   );
 
+  // Hydrate the queue with the jobs already registered against this batch
+  // so the operator sees existing pages after a refresh / resume.
+  useEffect(() => {
+    if (!activeBatchId) return;
+    let cancelled = false;
+    void (async () => {
+      const batch = await getBatchForCapture(activeBatchId);
+      if (cancelled || !batch) return;
+      const hydrated: QueueItem[] = batch.jobs.map((j) => {
+        const src = (j.sourceAsset ?? {}) as {
+          publicId?: string;
+          secureUrl?: string;
+        };
+        return {
+          id: j.id,
+          previewUrl: src.secureUrl ?? "",
+          documentType: (j.recordTypeHint ?? "AUTO") as DocumentType,
+          status: "uploaded",
+          progress: 100,
+          cloudinaryPublicId: src.publicId,
+          jobId: j.id,
+          fromServer: true,
+        };
+      });
+      // Merge: keep any in-flight session items, prepend server items it
+      // doesn't already have.
+      setQueue((q) => {
+        const seenJobIds = new Set(q.map((x) => x.jobId).filter(Boolean));
+        const fresh = hydrated.filter((h) => !seenJobIds.has(h.jobId));
+        return [...q, ...fresh];
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBatchId]);
+
   const uploadedCount = queue.filter((q) => q.status === "uploaded").length;
   const failedCount = queue.filter((q) => q.status === "failed").length;
-  const inflightCount = queue.filter((q) => q.status === "uploading").length;
+  const inflightCount = queue.filter(
+    (q) => q.status === "uploading" || q.status === "registering",
+  ).length;
 
   const startBatch = () =>
     startTransition(async () => {
@@ -171,7 +268,8 @@ export default function CaptureClient({
 
   const uploadOne = useCallback(
     async (item: QueueItem) => {
-      if (!activeBatchId) return;
+      if (!activeBatchId || !item.file) return;
+      const file = item.file;
 
       setQueue((q) =>
         q.map((x) =>
@@ -181,20 +279,38 @@ export default function CaptureClient({
 
       try {
         const sig = await fetchSignature(activeBatchId);
-        const out = await uploadToCloudinary(item.file, sig, (pct) => {
+        const out = await uploadToCloudinary(file, sig, (pct) => {
           setQueue((q) =>
             q.map((x) => (x.id === item.id ? { ...x, progress: pct } : x)),
           );
         });
+
+        // Cloudinary is happy — now register the asset with Pierflow so
+        // the queue survives a page refresh.
         setQueue((q) =>
           q.map((x) =>
             x.id === item.id
               ? {
                   ...x,
-                  status: "uploaded",
+                  status: "registering",
                   progress: 100,
                   cloudinaryPublicId: out.public_id,
                 }
+              : x,
+          ),
+        );
+
+        const reg = await registerIngest({
+          batchId: activeBatchId,
+          source: out,
+          filename: file.name,
+          documentType: item.documentType,
+        });
+
+        setQueue((q) =>
+          q.map((x) =>
+            x.id === item.id
+              ? { ...x, status: "uploaded", jobId: reg.job_id }
               : x,
           ),
         );
@@ -217,7 +333,11 @@ export default function CaptureClient({
   const remove = (id: string) =>
     setQueue((q) => {
       const dropped = q.find((x) => x.id === id);
-      if (dropped) URL.revokeObjectURL(dropped.previewUrl);
+      // Only revoke object URLs we created locally. Server-hydrated items
+      // carry a Cloudinary HTTPS URL we should leave alone.
+      if (dropped?.file && dropped.previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(dropped.previewUrl);
+      }
       return q.filter((x) => x.id !== id);
     });
 
@@ -481,6 +601,13 @@ function StatusBadge({ status }: { status: QueueItem["status"] }) {
       <span className="inline-flex items-center gap-1 text-[11px] text-[#1f6f99] font-medium">
         <Loader2 size={12} className="animate-spin" />
         Uploading
+      </span>
+    );
+  if (status === "registering")
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] text-[#1f6f99] font-medium">
+        <Loader2 size={12} className="animate-spin" />
+        Registering
       </span>
     );
   if (status === "failed")
