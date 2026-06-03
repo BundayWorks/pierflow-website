@@ -48,6 +48,10 @@ const FEATURES = [
     title: "Benefits verification",
     body: "Verify a member's coverage in milliseconds at point of care.",
   },
+  {
+    title: "Paper-to-FHIR migration",
+    body: "Pull historical paper patient records into your EMR or HMS as validated FHIR R4 bundles through the Records API.",
+  },
 ];
 
 export default function DevelopersPage() {

@@ -51,6 +51,11 @@ export const NAV_ITEMS: NavMenu[] = [
             desc: "Resell the connectivity layer.",
           },
           {
+            label: "EMR / HMS vendors",
+            href: "/solutions/emr-hms-vendors",
+            desc: "Activate hospital clients with the Records API.",
+          },
+          {
             label: "Hospitals",
             href: "/solutions/hospitals",
             desc: "Verify coverage, exchange records, get paid faster.",
@@ -85,6 +90,11 @@ export const NAV_ITEMS: NavMenu[] = [
             label: "Insurance distribution",
             href: "/platform/insurance-distribution",
             desc: "Plans, quotes, enrollment, policies.",
+          },
+          {
+            label: "Records API",
+            href: "/platform/records-api",
+            desc: "Paper records to FHIR R4 for any EMR or HMS.",
           },
         ],
       },
@@ -225,6 +235,13 @@ export const SOLUTIONS = [
     sub: "Verify coverage, exchange records, get paid faster.",
     icon: "Hospital",
     aiField: "eligibility_confidence",
+  },
+  {
+    slug: "emr-hms-vendors",
+    title: "EMR / HMS vendors",
+    sub: "Activate hospital clients with digitised paper records.",
+    icon: "Database",
+    aiField: "extraction_confidence",
   },
   {
     slug: "governments",

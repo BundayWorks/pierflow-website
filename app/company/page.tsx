@@ -107,6 +107,14 @@ export default function CompanyPage() {
             payments, referrals, and provider exchange.
           </p>
           <p>
+            The Records API is the second pillar. Most digital health systems
+            in Africa go live empty because decades of patient history sit on
+            paper in cabinets. We turn that paper into validated FHIR R4 data
+            so EMR and HMS partners can activate hospital clients on day one
+            — and every patient whose record passes through Pierflow is
+            naturally onboarded into the broader connectivity layer.
+          </p>
+          <p>
             And we are building it here, for here — by a team that understands
             what it means to navigate healthcare in Nigeria, with the global
             ambition to make every lesson learned here work across the continent.

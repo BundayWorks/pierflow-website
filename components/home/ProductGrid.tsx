@@ -12,13 +12,13 @@ const LARGE = [
     art: <DistributionArt />,
   },
   {
-    href: "/platform/intelligence",
-    eyebrow: "Intelligence",
-    title: "AI scoring & risk",
-    sub: "inline on every transaction.",
-    body: "Fraud, identity, lapse, eligibility — scored at the boundary, auditable end-to-end. Built for healthcare workflows.",
+    href: "/platform/records-api",
+    eyebrow: "Records API",
+    title: "Paper records to FHIR R4",
+    sub: "for any EMR, HMS, or partner system.",
+    body: "Turn decades of paper patient files into validated, FHIR R4-compliant bundles your downstream system can import in one call.",
     bg: "bg-card-sky",
-    art: <ScoreArt />,
+    art: <RecordsArt />,
   },
 ];
 
@@ -38,10 +38,17 @@ const SMALL = [
     art: <DataExchangeArt />,
   },
   {
+    href: "/platform/intelligence",
+    eyebrow: "Intelligence",
+    title: "AI scoring inline on every response",
+    sub: "Fraud, identity, lapse, eligibility — scored at the boundary, auditable end-to-end.",
+    art: <ScoreArt />,
+  },
+  {
     href: "/platform/identity",
     eyebrow: "Identity",
     title: "Verified members in milliseconds",
-    sub: "BVN, NIN, biometric, and historical signal fused into a single identity_confidence.",
+    sub: "BVN, NIN, biometric, and historical signal fused into identity_confidence.",
     art: <IdentityArt />,
   },
 ];
@@ -75,8 +82,8 @@ export default function ProductGrid() {
           ))}
         </div>
 
-        {/* three small cards */}
-        <div className="grid md:grid-cols-3 gap-5">
+        {/* four small cards */}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {SMALL.map((c) => (
             <SmallCard key={c.href} {...c} />
           ))}
@@ -195,6 +202,65 @@ function ScoreArt() {
           92
         </p>
         <p className="text-[10px] text-accent-ink/50 mt-1">out of 99</p>
+      </div>
+    </div>
+  );
+}
+
+function RecordsArt() {
+  return (
+    <div className="relative h-[180px]">
+      {/* stacked paper sheets, left */}
+      <div className="absolute left-2 bottom-4 w-[120px]">
+        <div className="absolute -left-1 -top-1 w-full h-[140px] rounded-md bg-white/70 border border-black/5 rotate-[-6deg]" />
+        <div className="absolute left-1 top-1 w-full h-[140px] rounded-md bg-white/85 border border-black/5 rotate-[-3deg]" />
+        <div className="relative w-full h-[140px] rounded-md bg-white border border-black/[0.06] shadow-[0_12px_30px_-12px_rgba(10,31,27,0.25)] p-3">
+          <div className="h-1.5 w-2/3 rounded-full bg-accent-ink/70" />
+          <div className="mt-2 space-y-1.5">
+            <div className="h-1 w-full rounded-full bg-accent-ink/15" />
+            <div className="h-1 w-5/6 rounded-full bg-accent-ink/15" />
+            <div className="h-1 w-3/4 rounded-full bg-accent-ink/15" />
+            <div className="h-1 w-4/5 rounded-full bg-accent-ink/15" />
+            <div className="h-1 w-2/3 rounded-full bg-accent-ink/15" />
+          </div>
+          <div className="mt-3 h-1 w-1/2 rounded-full bg-accent-ink/25" />
+        </div>
+      </div>
+
+      {/* arrow */}
+      <svg
+        className="absolute left-[135px] top-[80px]"
+        width="36"
+        height="20"
+        viewBox="0 0 36 20"
+        fill="none"
+        aria-hidden="true"
+      >
+        <path
+          d="M2 10 H30 M22 3 L30 10 L22 17"
+          stroke="#0DCE9A"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      </svg>
+
+      {/* FHIR bundle card, right */}
+      <div className="absolute right-2 bottom-4 w-[120px] rounded-md bg-white border border-black/[0.06] shadow-[0_12px_30px_-12px_rgba(10,31,27,0.25)] p-3 font-mono text-[10px]">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-accent-emerald">FHIR R4</span>
+          <span className="text-accent-ink/40">Bundle</span>
+        </div>
+        <p className="text-accent-ink/70 leading-[1.4]">
+          {"{ resourceType:"}
+        </p>
+        <p className="text-accent-ink/70 leading-[1.4]">
+          {"  \"Patient\","}
+        </p>
+        <p className="text-accent-ink/70 leading-[1.4]">
+          {"  conf: 0.97 }"}
+        </p>
       </div>
     </div>
   );

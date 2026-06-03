@@ -21,10 +21,10 @@ const USE_CASES = [
     href: "/solutions/hr-platforms",
   },
   {
-    tag: "Claims",
-    title: "Submit and reconcile claims with AI scoring inline.",
-    body: "Structured intake, fewer rejections. Every claim arrives with a fraud_score and eligibility_confidence.",
-    href: "/docs/claims",
+    tag: "Records API",
+    title: "Turn paper records into FHIR bundles your EMR can import.",
+    body: "Capture pages on a phone, get FHIR R4 Patient + Encounter + Observation bundles, reviewed and validated, in your next import package.",
+    href: "/docs/records/overview",
   },
 ];
 

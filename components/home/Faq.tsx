@@ -28,6 +28,10 @@ const FAQS = [
     q: "Is the data FHIR-aligned?",
     a: "Yes. Every canonical resource is bidirectionally mapped to FHIR R4. You write one integration, regardless of how the underlying HMO or hospital structures its data.",
   },
+  {
+    q: "What is the Records API?",
+    a: "It turns paper-based patient records — outpatient cards, lab slips, prescriptions, antenatal registers, immunisation cards, discharge summaries — into validated, FHIR R4-compliant bundles your EMR, HMS, or partner system can import in one call. Mobile capture for the MVP; scanner and MFP integrations on the roadmap. Low-confidence records are routed to human review before they ever reach your importer.",
+  },
 ];
 
 export default function Faq() {

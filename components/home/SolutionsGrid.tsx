@@ -6,6 +6,7 @@ import {
   Hospital,
   Globe,
   Users,
+  Database,
   ArrowUpRight,
   type LucideIcon,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const ICONS: Record<string, LucideIcon> = {
   Hospital,
   Globe,
   Users,
+  Database,
 };
 
 export default function SolutionsGrid() {
