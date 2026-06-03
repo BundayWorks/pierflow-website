@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireSessionContext } from "@/lib/auth";
+import { destroyAsset } from "@/lib/cloudinary";
 
 /**
  * Server actions used by the capture page.
@@ -52,6 +53,48 @@ export async function listRecentBatches() {
       _count: { select: { jobs: true } },
     },
   });
+}
+
+/**
+ * Permanently delete a ProcessingJob (a captured page) and its
+ * Cloudinary asset. Scoped to the caller's organization — a malicious
+ * client cannot delete someone else's job.
+ *
+ * We delete the DB row first so a duplicate request can't both succeed.
+ * The Cloudinary destroy is best-effort: if it fails, we leave the
+ * orphan and a future janitor can clean it up. The user's view doesn't
+ * depend on Cloudinary state.
+ */
+export async function deleteJob(jobId: string) {
+  const ctx = await requireSessionContext();
+
+  const job = await db.processingJob.findUnique({
+    where: { id: jobId },
+    select: {
+      id: true,
+      organizationId: true,
+      sourceAsset: true,
+      batchId: true,
+    },
+  });
+  if (!job || job.organizationId !== ctx.organization.id) {
+    throw new Error("JOB_NOT_FOUND");
+  }
+
+  // ExtractedRecords cascade via Prisma's relation, so we can just drop
+  // the job and Postgres handles the rest.
+  await db.processingJob.delete({ where: { id: jobId } });
+
+  const src = (job.sourceAsset ?? {}) as {
+    publicId?: string;
+    secureUrl?: string;
+  };
+  if (src.publicId) {
+    void destroyAsset(src.publicId);
+  }
+
+  revalidatePath("/portal/capture");
+  return { deleted: true };
 }
 
 /**

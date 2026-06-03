@@ -87,6 +87,33 @@ export function buildSignedUpload(opts: {
 }
 
 /**
+ * Permanently delete an asset from Cloudinary. Used when an operator
+ * removes a captured page from a batch — we never want orphaned blobs
+ * outliving the database row that referenced them.
+ *
+ * Returns true if Cloudinary considered the asset gone (including the
+ * "not found" case, which we treat as success so retries are safe).
+ */
+export async function destroyAsset(
+  publicId: string,
+  opts?: { resourceType?: "image" | "raw" | "video" },
+): Promise<boolean> {
+  ensureConfigured();
+  try {
+    const result = await cloudinary.uploader.destroy(publicId, {
+      resource_type: opts?.resourceType ?? "image",
+      invalidate: true,
+    });
+    return result.result === "ok" || result.result === "not found";
+  } catch (err) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[cloudinary] destroy failed:", publicId, err);
+    }
+    return false;
+  }
+}
+
+/**
  * Return a short-lived, signed URL for an already-uploaded asset.
  * Used by the review portal to fetch private originals.
  */

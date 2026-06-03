@@ -16,7 +16,7 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
-import { createBatch, getBatchForCapture } from "./actions";
+import { createBatch, deleteJob, getBatchForCapture } from "./actions";
 
 /* ── Domain types ────────────────────────────────────────────── */
 
@@ -330,16 +330,34 @@ export default function CaptureClient({
 
   const retry = (item: QueueItem) => void uploadOne(item);
 
-  const remove = (id: string) =>
+  const remove = useCallback(async (id: string) => {
+    let dropped: QueueItem | undefined;
     setQueue((q) => {
-      const dropped = q.find((x) => x.id === id);
-      // Only revoke object URLs we created locally. Server-hydrated items
-      // carry a Cloudinary HTTPS URL we should leave alone.
+      dropped = q.find((x) => x.id === id);
       if (dropped?.file && dropped.previewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(dropped.previewUrl);
       }
       return q.filter((x) => x.id !== id);
     });
+
+    // If the item was already registered with the server (has a jobId,
+    // either freshly assigned or hydrated from the DB), tear it down
+    // there too. Failure rolls the optimistic removal back so the
+    // operator can retry.
+    if (dropped?.jobId) {
+      try {
+        await deleteJob(dropped.jobId);
+      } catch {
+        if (dropped) {
+          const restored = dropped;
+          setQueue((q) => [restored, ...q]);
+          window.alert(
+            "Couldn't remove this page right now. Please try again.",
+          );
+        }
+      }
+    }
+  }, []);
 
   /* ── Render ─────────────────────────────────────────────────── */
 
@@ -547,9 +565,14 @@ export default function CaptureClient({
                 )}
                 <button
                   type="button"
-                  onClick={() => remove(item.id)}
-                  className="text-accent-ink/40 hover:text-accent-ink"
+                  onClick={() => void remove(item.id)}
+                  disabled={
+                    item.status === "uploading" ||
+                    item.status === "registering"
+                  }
+                  className="text-accent-ink/40 hover:text-accent-ink disabled:opacity-30 disabled:cursor-not-allowed"
                   aria-label="Remove"
+                  title="Remove from batch"
                 >
                   <Trash2 size={14} />
                 </button>
