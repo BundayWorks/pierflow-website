@@ -7,46 +7,52 @@
  * the life of the process. In production (Vercel Fluid Compute) the
  * same pattern keeps us at one client per warm instance.
  *
- * Prisma 7 reads the connection URL from env automatically. We surface
- * a clearer error here if none of the expected names are set.
+ * Prisma 7 is engine-less by default — the JS-only runtime uses a
+ * driver adapter (pg) for the actual Postgres connection. That works
+ * well on Vercel because we get standard pg pooling semantics.
  */
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
-function ensureDatabaseUrl() {
-  const url =
+function resolveDatabaseUrl(): string | undefined {
+  // Prefer the pooled URL at runtime — every Vercel Function should use
+  // PgBouncer to avoid connection exhaustion.
+  return (
     process.env.DATABASE_URL ??
     process.env.POSTGRES_PRISMA_URL ??
     process.env.POSTGRES_URL ??
-    process.env.POSTGRES_URL_NON_POOLING;
-
-  if (!url && process.env.NODE_ENV !== "production") {
-    // Loud but non-fatal in dev so `next dev` still boots when no DB is
-    // configured yet (e.g. someone running just the marketing site).
-    console.warn(
-      "[db] No POSTGRES_* / DATABASE_URL env var set. Prisma queries will fail.",
-    );
-  }
-
-  // Map whatever name Supabase / Vercel chose into the one Prisma reads.
-  if (url && !process.env.DATABASE_URL) {
-    process.env.DATABASE_URL = url;
-  }
+    process.env.POSTGRES_URL_NON_POOLING
+  );
 }
-
-ensureDatabaseUrl();
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient({
+function createClient(): PrismaClient {
+  const connectionString = resolveDatabaseUrl();
+  if (!connectionString) {
+    // Loud in dev so devs notice, but don't crash the import — the
+    // marketing site has many pages that don't need a DB.
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        "[db] No POSTGRES_* / DATABASE_URL env var set. Prisma queries will fail.",
+      );
+    }
+  }
+  const adapter = new PrismaPg({
+    connectionString: connectionString ?? "postgres://placeholder",
+  });
+  return new PrismaClient({
+    adapter,
     log:
       process.env.NODE_ENV === "development"
         ? ["query", "warn", "error"]
         : ["warn", "error"],
   });
+}
+
+export const db = globalForPrisma.prisma ?? createClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = db;

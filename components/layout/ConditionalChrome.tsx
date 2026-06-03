@@ -4,15 +4,20 @@ import { usePathname } from "next/navigation";
 import Nav from "./Nav";
 import Footer from "./Footer";
 
+function hasOwnChrome(pathname: string) {
+  // Docs and Portal swap the marketing chrome for their own.
+  return pathname.startsWith("/docs") || pathname.startsWith("/portal");
+}
+
 export function ConditionalNav() {
   const pathname = usePathname() ?? "";
-  if (pathname.startsWith("/docs")) return null;
+  if (hasOwnChrome(pathname)) return null;
   return <Nav />;
 }
 
 export function ConditionalFooter() {
   const pathname = usePathname() ?? "";
-  if (pathname.startsWith("/docs")) return null;
+  if (hasOwnChrome(pathname)) return null;
   return <Footer />;
 }
 
@@ -22,8 +27,6 @@ export function ConditionalMainPadding({
   children: React.ReactNode;
 }) {
   const pathname = usePathname() ?? "";
-  const isDocs = pathname.startsWith("/docs");
-  return (
-    <main className={isDocs ? "" : "pt-[84px]"}>{children}</main>
-  );
+  const ownChrome = hasOwnChrome(pathname);
+  return <main className={ownChrome ? "" : "pt-[84px]"}>{children}</main>;
 }
