@@ -14,6 +14,7 @@ import {
   Sparkles,
   Lock,
   BookOpen,
+  FileText,
   type LucideIcon,
 } from "lucide-react";
 import { DOCS_TREE, type DocSection, type DocPage } from "@/lib/docs-structure";
@@ -30,6 +31,7 @@ const ICONS: Record<string, LucideIcon> = {
   Sparkles,
   Lock,
   BookOpen,
+  FileText,
 };
 
 function hrefFor(p: DocPage) {

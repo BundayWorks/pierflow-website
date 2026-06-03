@@ -6,6 +6,7 @@ import {
   Sparkles,
   BookOpen,
   Boxes,
+  FileText,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -31,6 +32,12 @@ const HUB = [
     title: "API reference",
     desc: "Every endpoint, every shape, with copy-paste examples.",
     href: "/docs/api/overview",
+  },
+  {
+    icon: FileText,
+    title: "Records API",
+    desc: "Turn paper records into FHIR R4 bundles for any EMR or HMS.",
+    href: "/docs/records/overview",
   },
   {
     icon: Boxes,

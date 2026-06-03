@@ -291,6 +291,75 @@ export const DOCS_TREE: DocSection[] = [
     ],
   },
   {
+    title: "Records API",
+    icon: "FileText",
+    pages: [
+      {
+        title: "Overview",
+        slug: "records-overview",
+        path: "records/overview",
+        summary:
+          "Convert paper-based patient records into validated, FHIR R4-compliant data and pull them into your EMR, HMS, or partner system.",
+        anchors: [
+          { label: "How it works", hash: "how-it-works" },
+          { label: "Who it's for", hash: "who-its-for" },
+          { label: "What you get back", hash: "what-you-get" },
+        ],
+      },
+      {
+        title: "Capture options",
+        slug: "records-capture",
+        path: "records/capture",
+        anchors: [
+          { label: "Mobile capture (available)", hash: "mobile" },
+          { label: "Direct upload", hash: "direct" },
+          { label: "Scanner integrations (roadmap)", hash: "scanners" },
+        ],
+      },
+      {
+        title: "Ingest documents",
+        slug: "records-ingest",
+        path: "records/ingest",
+        anchors: [
+          { label: "Endpoint", hash: "endpoint" },
+          { label: "Document types", hash: "types" },
+          { label: "Job lifecycle", hash: "lifecycle" },
+        ],
+      },
+      {
+        title: "Organizations",
+        slug: "records-organizations",
+        path: "records/organizations",
+      },
+      {
+        title: "Patients",
+        slug: "records-patients",
+        path: "records/patients",
+        anchors: [
+          { label: "List patients", hash: "list" },
+          { label: "Patient FHIR bundle", hash: "bundle" },
+          { label: "Identifiers", hash: "identifiers" },
+        ],
+      },
+      {
+        title: "Import packages",
+        slug: "records-packages",
+        path: "records/packages",
+        anchors: [
+          { label: "Why packages", hash: "why" },
+          { label: "Listing packages", hash: "list" },
+          { label: "Downloading", hash: "download" },
+          { label: "Acknowledging", hash: "ack" },
+        ],
+      },
+      {
+        title: "Confidence & review",
+        slug: "records-confidence",
+        path: "records/confidence",
+      },
+    ],
+  },
+  {
     title: "Trust",
     icon: "Lock",
     pages: [
