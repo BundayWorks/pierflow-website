@@ -1,12 +1,15 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-const isPortalRoute = createRouteMatcher(["/portal(.*)"]);
+// Routes that humans must be signed in to see.
+const isProtectedPortalRoute = createRouteMatcher([
+  "/portal",
+  "/portal/((?!sign-in|sign-up).*)",
+]);
 
 export default clerkMiddleware(async (auth, req) => {
-  // Humans accessing the portal must be signed in.
-  // The /v1/* API is not session-based — it authenticates with bearer
-  // tokens validated inside each route handler.
-  if (isPortalRoute(req)) {
+  // The /v1/* partner API is not session-based — it authenticates with
+  // bearer tokens validated inside each route handler.
+  if (isProtectedPortalRoute(req)) {
     await auth.protect();
   }
 });

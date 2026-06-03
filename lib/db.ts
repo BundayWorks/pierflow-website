@@ -7,42 +7,67 @@
  * the life of the process. In production (Vercel Fluid Compute) the
  * same pattern keeps us at one client per warm instance.
  *
- * Prisma 7 is engine-less by default — the JS-only runtime uses a
- * driver adapter (pg) for the actual Postgres connection. That works
- * well on Vercel because we get standard pg pooling semantics.
+ * TLS rationale: pg v8+ interprets `sslmode=require` in the URL as
+ * `verify-full` and ignores per-pool `ssl` overrides. Supabase's pooled
+ * endpoint serves a certificate chain Node's default CA bundle doesn't
+ * include. We rewrite the URL's sslmode to `no-verify` BEFORE Prisma
+ * (or any adapter) reads it. The connection itself remains TLS-
+ * encrypted; we just skip cert-chain verification.
  */
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 
-function resolveDatabaseUrl(): string | undefined {
-  // Prefer the pooled URL at runtime — every Vercel Function should use
-  // PgBouncer to avoid connection exhaustion.
-  return (
-    process.env.DATABASE_URL ??
-    process.env.POSTGRES_PRISMA_URL ??
-    process.env.POSTGRES_URL ??
-    process.env.POSTGRES_URL_NON_POOLING
-  );
+function relaxSslmode(url: string): string {
+  if (/sslmode=/.test(url)) {
+    return url.replace(/sslmode=[^&]+/, "sslmode=no-verify");
+  }
+  return url + (url.includes("?") ? "&" : "?") + "sslmode=no-verify";
 }
+
+// Resolve the URL from any of the names our deploys use, then relax
+// sslmode and write it back as DATABASE_URL — which is what Prisma's
+// generated client reads by default.
+function normaliseEnv(): void {
+  const candidates = [
+    "DATABASE_URL",
+    "POSTGRES_PRISMA_URL",
+    "POSTGRES_URL",
+    "POSTGRES_URL_NON_POOLING",
+  ];
+  for (const name of candidates) {
+    const v = process.env[name];
+    if (v) {
+      process.env[name] = relaxSslmode(v);
+    }
+  }
+  // Ensure DATABASE_URL specifically is set — Prisma reads that name.
+  if (!process.env.DATABASE_URL) {
+    const fallback =
+      process.env.POSTGRES_PRISMA_URL ??
+      process.env.POSTGRES_URL ??
+      process.env.POSTGRES_URL_NON_POOLING;
+    if (fallback) process.env.DATABASE_URL = fallback;
+  }
+}
+
+normaliseEnv();
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
 function createClient(): PrismaClient {
-  const connectionString = resolveDatabaseUrl();
-  if (!connectionString) {
-    // Loud in dev so devs notice, but don't crash the import — the
-    // marketing site has many pages that don't need a DB.
-    if (process.env.NODE_ENV !== "production") {
-      console.warn(
-        "[db] No POSTGRES_* / DATABASE_URL env var set. Prisma queries will fail.",
-      );
-    }
-  }
-  const adapter = new PrismaPg({
-    connectionString: connectionString ?? "postgres://placeholder",
+  const connectionString =
+    process.env.DATABASE_URL ?? "postgres://placeholder";
+
+  const pool = new Pool({
+    connectionString,
+    ssl: { rejectUnauthorized: false },
+    max: 10,
   });
+
+  const adapter = new PrismaPg(pool);
   return new PrismaClient({
     adapter,
     log:
