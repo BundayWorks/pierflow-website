@@ -15,7 +15,7 @@ export default function Page() {
       <DocPageHeader
         eyebrow="Quickstart"
         title="Introduction"
-        description="Pierflow is the infrastructure layer that makes health insurance distributable through any digital channel in Nigeria — and extends to the wider connectivity layer for healthcare in Africa."
+        description="Pierflow is the connectivity layer for healthcare in Africa — distribution rails for insurance products, and a Records API that turns paper records into FHIR R4 data your EMR or HMS can import."
       />
 
       <H2 id="who-its-for">Who Pierflow is for</H2>
@@ -28,6 +28,8 @@ export default function Page() {
           ["A fintech or super-app", "Embedded HMO plans, savings, benefits"],
           ["An HR or payroll platform", "Group enrollment across multiple HMOs"],
           ["A hospital or clinic", "Verification, claims, FHIR record exchange"],
+          ["An EMR / HMS vendor", "Records API — pull historical patient data as FHIR R4 bundles"],
+          ["A diagnostic lab", "Verification, claims, archive digitisation"],
           ["An HMO software vendor", "Distribution rails + AI scoring layer"],
           ["A government programme", "Population data exchange + analytics"],
         ]}

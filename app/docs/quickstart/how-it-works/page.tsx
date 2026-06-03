@@ -15,7 +15,7 @@ export default function Page() {
       <DocPageHeader
         eyebrow="Quickstart"
         title="How it works"
-        description="A mental model of the platform — five layers that turn a fragmented HMO ecosystem into one API."
+        description="A mental model of the platform — layered, canonical, and standards-aligned. The same architecture powers connectivity for distribution, claims, verification, and the Records API."
       />
 
       <H2 id="five-layer-model">Five-layer model</H2>

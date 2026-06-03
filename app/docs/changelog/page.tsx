@@ -8,6 +8,12 @@ import { neighbors } from "@/components/docs/nav-helpers";
 
 const ENTRIES = [
   {
+    date: "2026-06-03",
+    title: "Records API documentation",
+    body:
+      "Public docs for the Records API: turn paper-based patient records into FHIR R4 bundles your EMR, HMS, or partner system can import in one call. Covers capture options (mobile, direct upload, scanners on the roadmap), the Ingest endpoint, Organizations and Patients endpoints, Import Packages (list / download / acknowledge), and the confidence + review model. Generally available for partners onboarding in beta.",
+  },
+  {
     date: "2026-05-30",
     title: "Plaid-style docs experience",
     body:

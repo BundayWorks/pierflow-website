@@ -18,6 +18,10 @@ export default function Page() {
       />
 
       <H2 id="endpoints">REST endpoints</H2>
+      <Body>
+        Connectivity (insurance distribution, claims, verification, providers)
+        and Records API (paper-to-digital ingestion and partner import).
+      </Body>
       <KVTable
         headers={["Resource", "Endpoint"]}
         rows={[
@@ -30,6 +34,32 @@ export default function Page() {
           ["Providers", "/v1/providers"],
           ["Webhooks", "/v1/webhooks/endpoints"],
           ["Settlement", "/v1/settlements"],
+        ]}
+      />
+
+      <H2 id="records-endpoints">Records API endpoints</H2>
+      <Body>
+        See the{" "}
+        <a
+          href="/docs/records/overview"
+          className="text-accent-emerald underline"
+        >
+          Records API
+        </a>{" "}
+        section for full request and response shapes.
+      </Body>
+      <KVTable
+        headers={["Resource", "Endpoint"]}
+        rows={[
+          ["Ingest documents", "POST /v1/ingest/documents"],
+          ["Job status", "GET /v1/jobs/:id"],
+          ["Organizations", "GET /v1/organizations"],
+          ["One organization", "GET /v1/organizations/:id"],
+          ["Patients", "GET /v1/organizations/:id/patients"],
+          ["Patient FHIR bundle", "GET /v1/organizations/:id/patients/:patient_id/fhir"],
+          ["Import packages", "GET /v1/organizations/:id/import-packages"],
+          ["Download package", "GET /v1/import-packages/:package_id/download"],
+          ["Acknowledge package", "POST /v1/import-packages/:package_id/acknowledge"],
         ]}
       />
 
