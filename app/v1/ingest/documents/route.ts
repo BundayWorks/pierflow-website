@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getOrCreateSessionContext } from "@/lib/auth";
 import { db } from "@/lib/db";
 import type { DocumentType, JobPriority } from "@prisma/client";
+import { runExtractionForJob } from "@/lib/extraction/runExtraction";
 
 /**
  * POST /v1/ingest/documents
@@ -130,8 +131,14 @@ export async function POST(req: Request) {
     select: { id: true, batchId: true, status: true, pageCount: true },
   });
 
-  // Phase 1 ships without auto-trigger — extraction happens in the next
-  // step. When that's wired we'll enqueue here.
+  // Fire-and-forget extraction. Vercel Fluid Compute keeps the function
+  // instance alive past the response, so this completes asynchronously
+  // without blocking the client.
+  void runExtractionForJob(job.id).catch((err) => {
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[ingest] extraction kickoff failed:", err);
+    }
+  });
 
   return NextResponse.json(
     {
