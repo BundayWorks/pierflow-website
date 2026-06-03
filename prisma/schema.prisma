@@ -1,0 +1,480 @@
+// Pierflow data model.
+//
+// Nomenclature is deliberately vendor-neutral so the same schema scales
+// across any health-industry participant: hospitals, clinics, labs,
+// pharmacies, insurers, EMR / HMS / EHR vendors, government programmes.
+//
+// Core ideas:
+//  • Organization is the multi-tenant root (any contracted entity).
+//  • Partner is the downstream API consumer; PartnerOrganizationLink
+//    gates which organizations a partner can act on.
+//  • Patient identifiers live in a separate table so we can hold MRN,
+//    BVN, NIN, NHIS, HMO card, passport, etc. without schema churn.
+//  • Money is BigInt minor units. Time is ISO-8601 UTC.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Organizations & sites
+// ─────────────────────────────────────────────────────────────────────
+
+enum OrganizationType {
+  HOSPITAL
+  CLINIC
+  LAB
+  PHARMACY
+  INSURER
+  EMR_VENDOR
+  HMS_VENDOR
+  GOVERNMENT
+  COOPERATIVE
+  OTHER
+}
+
+model Organization {
+  id          String           @id @default(cuid())
+  name        String
+  type        OrganizationType
+  // Public-facing slug, optional, used in URLs and references
+  slug        String?          @unique
+  // Address rolled up to the org if there's only one site
+  street      String?
+  lga         String?
+  state       String?
+  country     String           @default("NG")
+  // Free-form metadata for fields we haven't formalised
+  metadata    Json?
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  sites               Site[]
+  members             OrgMember[]
+  partnerLinks        PartnerOrganizationLink[]
+  patients            Patient[]
+  scanBatches         ScanBatch[]
+  processingJobs      ProcessingJob[]
+  extractedRecords    ExtractedRecord[]
+  importPackages      ImportPackage[]
+
+  @@index([type])
+  @@index([isActive])
+  @@map("organizations")
+}
+
+model Site {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  street         String?
+  lga            String?
+  state          String?
+  country        String       @default("NG")
+  // FHIR Location.position
+  latitude       Float?
+  longitude      Float?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  scanBatches    ScanBatch[]
+
+  @@index([organizationId])
+  @@map("sites")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Members (humans inside an Organization, authenticated via Clerk)
+// ─────────────────────────────────────────────────────────────────────
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  CLINICAL_REVIEWER
+  DATA_OFFICER
+  CAPTURE_OPERATOR
+  VIEWER
+}
+
+model OrgMember {
+  id             String        @id @default(cuid())
+  // External identity provider subject (Clerk user id)
+  externalId     String
+  organizationId String
+  role           OrgRole       @default(VIEWER)
+  email          String?
+  displayName    String?
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // A single human can hold one role per organization
+  @@unique([externalId, organizationId])
+  @@index([organizationId])
+  @@index([externalId])
+  @@map("org_members")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Partners (downstream API consumers — EMR / HMS / payer / etc.)
+// ─────────────────────────────────────────────────────────────────────
+
+enum PartnerType {
+  EMR_VENDOR
+  HMS_VENDOR
+  EHR_VENDOR
+  INSURER
+  GOVERNMENT
+  ANALYTICS
+  OTHER
+}
+
+model Partner {
+  id          String      @id @default(cuid())
+  name        String
+  slug        String      @unique
+  type        PartnerType
+  // Optional public-facing logo / website
+  websiteUrl  String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  apiKeys             PartnerApiKey[]
+  organizationLinks   PartnerOrganizationLink[]
+  importPackages      ImportPackage[]
+  webhookEndpoints    WebhookEndpoint[]
+
+  @@map("partners")
+}
+
+model PartnerApiKey {
+  id           String    @id @default(cuid())
+  partnerId    String
+  // Hashed secret — never store the raw key
+  keyHash      String    @unique
+  // Last 4 of the key for display purposes (e.g. "…f3a1")
+  last4        String
+  // Human label set by the partner ("prod", "staging", "ci")
+  label        String?
+  scopes       String[]  @default([])
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime?
+
+  partner      Partner   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@map("partner_api_keys")
+}
+
+model PartnerOrganizationLink {
+  id             String       @id @default(cuid())
+  partnerId      String
+  organizationId String
+  // The package format this partner wants this org's data in
+  preferredFormat String      @default("FHIR_R4_JSON")
+  createdAt      DateTime     @default(now())
+
+  partner        Partner      @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, organizationId])
+  @@index([partnerId])
+  @@index([organizationId])
+  @@map("partner_organization_links")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Patients
+// ─────────────────────────────────────────────────────────────────────
+
+enum PatientSex {
+  M
+  F
+  U
+}
+
+model Patient {
+  id             String       @id @default(cuid())
+  organizationId String
+  // Cached most-recent display fields. Source of truth lives in
+  // ExtractedRecord.fhirBundle for clinical history.
+  fullName       String
+  dateOfBirth    DateTime?
+  sex            PatientSex   @default(U)
+  bloodGroup     String?
+  genotype       String?
+  // Optional "this is probably the same person as …" pointer
+  possibleDuplicateOfId String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization        Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  possibleDuplicateOf Patient?            @relation("PatientDuplicate", fields: [possibleDuplicateOfId], references: [id])
+  possibleDuplicates  Patient[]           @relation("PatientDuplicate")
+  identifiers         PatientIdentifier[]
+  extractedRecords    ExtractedRecord[]
+
+  @@index([organizationId])
+  @@index([fullName])
+  @@map("patients")
+}
+
+// Extensible identifier table — new ID types are new system URIs,
+// not schema migrations.
+model PatientIdentifier {
+  id        String   @id @default(cuid())
+  patientId String
+  // Stable system URI: https://pierflow.com/mrn, /bvn, /nin, /nhis, /hmo-card, …
+  system    String
+  value     String
+  // Optional FHIR `Identifier.use` (official, secondary, etc.)
+  use       String?
+  createdAt DateTime @default(now())
+
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  // Same value in the same system, on the same patient, should never duplicate
+  @@unique([patientId, system, value])
+  @@index([system, value])
+  @@map("patient_identifiers")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Records pipeline: ScanBatch → ProcessingJob → ExtractedRecord
+// ─────────────────────────────────────────────────────────────────────
+
+enum JobPriority {
+  NORMAL
+  URGENT
+}
+
+enum DocumentType {
+  AUTO
+  OUTPATIENT_CARD
+  REGISTRATION
+  LAB_RESULT
+  PRESCRIPTION
+  ANTENATAL
+  IMMUNISATION
+  DISCHARGE_SUMMARY
+  XRAY_REPORT
+  ULTRASOUND_REPORT
+  OPERATION_NOTE
+  REFERRAL_LETTER
+  OTHER
+  UNKNOWN
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  AWAITING_REVIEW
+  VALIDATED
+  IMPORTED
+  FAILED
+}
+
+model ScanBatch {
+  id             String        @id @default(cuid())
+  organizationId String
+  siteId         String?
+  label          String?
+  priority       JobPriority   @default(NORMAL)
+  // Clerk user id of the operator who created the batch
+  operatorId     String?
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  site           Site?         @relation(fields: [siteId], references: [id])
+  jobs           ProcessingJob[]
+
+  @@index([organizationId])
+  @@map("scan_batches")
+}
+
+model ProcessingJob {
+  id              String        @id @default(cuid())
+  batchId         String
+  organizationId  String
+  // Object reference in Cloudinary: { publicId, version, format, width, height, bytes }
+  sourceAsset     Json
+  sourceFilename  String?
+  pageCount       Int           @default(1)
+  recordTypeHint  DocumentType  @default(AUTO)
+  priority        JobPriority   @default(NORMAL)
+  status          JobStatus     @default(QUEUED)
+  // Idempotency-Key supplied by the caller
+  idempotencyKey  String?
+  // Free-text reason set when status = FAILED
+  errorCode       String?
+  errorDetail     String?
+  retryCount      Int           @default(0)
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  batch           ScanBatch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  extractedRecords ExtractedRecord[]
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([batchId])
+  @@index([organizationId, status])
+  @@map("processing_jobs")
+}
+
+enum RecordValidationStatus {
+  PENDING
+  AUTO_APPROVED
+  REVIEW_REQUIRED
+  VALIDATED
+  REJECTED
+}
+
+model ExtractedRecord {
+  id                   String        @id @default(cuid())
+  jobId                String
+  organizationId       String
+  patientId            String?
+  documentType         DocumentType
+  pageNumbers          Int[]         @default([])
+  // Raw model output: { fields..., _confidence per field, _raw per field }
+  extractedJson        Json
+  // FHIR R4 Bundle assembled from extractedJson
+  fhirBundle           Json?
+  completenessScore    Float?
+  avgConfidence        Float?
+  lowConfidenceFields  Json?
+  validationStatus     RecordValidationStatus @default(PENDING)
+  // Clerk user id of reviewer + timestamp + notes
+  reviewerExternalId   String?
+  reviewedAt           DateTime?
+  reviewerNotes        String?
+  importPackageId      String?
+  importedAt           DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  job                  ProcessingJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  organization         Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient              Patient?       @relation(fields: [patientId], references: [id])
+  importPackage        ImportPackage? @relation(fields: [importPackageId], references: [id])
+
+  @@index([organizationId, validationStatus])
+  @@index([jobId])
+  @@index([patientId])
+  @@map("extracted_records")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Import packages (consumed by Partners)
+// ─────────────────────────────────────────────────────────────────────
+
+enum ImportPackageStatus {
+  BUILDING
+  READY
+  ACKNOWLEDGED
+  EXPIRED
+}
+
+model ImportPackage {
+  id              String              @id @default(cuid())
+  organizationId  String
+  partnerId       String
+  status          ImportPackageStatus @default(BUILDING)
+  patientCount    Int                 @default(0)
+  recordCount     Int                 @default(0)
+  // Cloudinary asset for the assembled ZIP
+  archiveAsset    Json?
+  fileSizeBytes   BigInt?
+  checksumSha256  String?
+  createdAt       DateTime            @default(now())
+  expiresAt       DateTime?
+  acknowledgedAt  DateTime?
+  ackImportedCount Int?
+  ackFailedCount   Int?
+  ackPayload      Json?
+  updatedAt       DateTime            @updatedAt
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  partner          Partner           @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  extractedRecords ExtractedRecord[]
+
+  @@index([partnerId, status])
+  @@index([organizationId, status])
+  @@map("import_packages")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Webhooks (kept for shape; delivery wired in a later step)
+// ─────────────────────────────────────────────────────────────────────
+
+model WebhookEndpoint {
+  id          String   @id @default(cuid())
+  partnerId   String
+  url         String
+  events      String[] @default([])
+  // Per-endpoint HMAC secret, stored hashed
+  secretHash  String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  partner     Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@map("webhook_endpoints")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Audit log (append-only via DB policy added in a SQL migration)
+// ─────────────────────────────────────────────────────────────────────
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  EXPORT
+  IMPORT
+  LOGIN
+  LOGOUT
+}
+
+model AuditLog {
+  id              String       @id @default(cuid())
+  occurredAt      DateTime     @default(now())
+  // Actor: either an org_member (Clerk subject) or a partner_api_key id
+  actorType       String       // "member" | "partner_api_key" | "system"
+  actorId         String?
+  organizationId  String?
+  partnerId       String?
+  action          AuditAction
+  resourceType    String       // "patient" | "extracted_record" | …
+  resourceId      String?
+  ipAddress       String?
+  userAgent       String?
+  // Anything else worth keeping: request id, before/after diff hashes, …
+  detail          Json?
+
+  @@index([occurredAt])
+  @@index([organizationId, occurredAt])
+  @@index([partnerId, occurredAt])
+  @@index([actorType, actorId])
+  @@map("audit_log")
+}
