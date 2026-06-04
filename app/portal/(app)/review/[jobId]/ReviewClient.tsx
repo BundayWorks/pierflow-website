@@ -117,23 +117,53 @@ function FieldRenderer({
           </p>
           {confidenceBadge(leaf._confidence)}
         </div>
-        <input
-          type={isNumber ? "number" : "text"}
-          step={isNumber ? "any" : undefined}
-          value={value == null ? "" : String(value)}
-          onChange={(e) => {
-            const raw = e.target.value;
-            const newValue: unknown = isNumber
-              ? raw === ""
-                ? null
-                : Number(raw)
-              : raw;
-            onLeafChange([...path, "value"], newValue);
-          }}
-          className="w-full bg-transparent text-[14px] focus:outline-none"
-        />
+        {(() => {
+          const stringValue = value == null ? "" : String(value);
+          const useTextarea =
+            !isNumber &&
+            (stringValue.length > 80 || stringValue.includes("\n"));
+          if (useTextarea) {
+            return (
+              <textarea
+                value={stringValue}
+                onChange={(e) =>
+                  onLeafChange([...path, "value"], e.target.value)
+                }
+                rows={Math.min(
+                  10,
+                  Math.max(
+                    2,
+                    stringValue.split("\n").length,
+                    Math.ceil(stringValue.length / 60),
+                  ),
+                )}
+                className="w-full bg-transparent text-[14px] leading-[1.5] focus:outline-none resize-y"
+              />
+            );
+          }
+          return (
+            <input
+              type={isNumber ? "number" : "text"}
+              step={isNumber ? "any" : undefined}
+              value={stringValue}
+              onChange={(e) => {
+                const raw = e.target.value;
+                const newValue: unknown = isNumber
+                  ? raw === ""
+                    ? null
+                    : Number(raw)
+                  : raw;
+                onLeafChange([...path, "value"], newValue);
+              }}
+              className="w-full bg-transparent text-[14px] focus:outline-none"
+            />
+          );
+        })()}
         {leaf._raw && (
-          <p className="mt-1 text-[10px] text-accent-ink/45 truncate" title={leaf._raw}>
+          <p
+            className="mt-1 text-[10px] text-accent-ink/45 whitespace-pre-wrap break-words"
+            title={leaf._raw}
+          >
             raw: {leaf._raw}
           </p>
         )}
