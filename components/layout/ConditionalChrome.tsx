@@ -5,8 +5,13 @@ import Nav from "./Nav";
 import Footer from "./Footer";
 
 function hasOwnChrome(pathname: string) {
-  // Docs and Portal swap the marketing chrome for their own.
-  return pathname.startsWith("/docs") || pathname.startsWith("/portal");
+  // Docs, Portal, and the get-started onboarding flow swap the
+  // marketing chrome for their own.
+  return (
+    pathname.startsWith("/docs") ||
+    pathname.startsWith("/portal") ||
+    pathname.startsWith("/get-started")
+  );
 }
 
 export function ConditionalNav() {

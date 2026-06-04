@@ -20,6 +20,7 @@ import {
   saveSecurityAssessment,
   requestProductionAccess,
 } from "./actions";
+import EmailVerification from "./EmailVerification";
 
 type PartnerInfo = {
   id: string;
@@ -367,12 +368,7 @@ function ChecklistDetail({
   }
 
   if (item === "emailVerified") {
-    return (
-      <p className="mt-4 text-[12px] text-accent-ink/55 leading-[1.65]">
-        Check your inbox for the Clerk verification email and click the
-        confirmation link. Refresh this page once you&apos;ve confirmed.
-      </p>
-    );
+    return <EmailVerification />;
   }
 
   if (item === "firstApiCall") {
