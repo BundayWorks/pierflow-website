@@ -168,7 +168,7 @@ export const NAV_ITEMS: NavMenu[] = [
         items: [
           {
             label: "Quick start",
-            href: "/docs/getting-started",
+            href: "/docs/quickstart/introduction",
             desc: "From sandbox to production in five steps.",
           },
           {

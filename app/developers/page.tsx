@@ -95,7 +95,7 @@ export default function DevelopersPage() {
               Request API access
             </Link>
             <Link
-              href="/docs/getting-started"
+              href="/docs/quickstart/introduction"
               className="text-[13px] font-medium px-4 py-2.5 rounded-md border border-[#ddd] text-textl-primary hover:bg-[#f7f7f7]"
             >
               Read the docs

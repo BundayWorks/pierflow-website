@@ -18,7 +18,7 @@ export default function DevCta() {
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
             <Link
-              href="/docs/getting-started"
+              href="/docs/quickstart/introduction"
               className="text-[13px] font-medium px-4 py-2.5 rounded-md bg-accent-green text-dark-bg hover:opacity-90"
             >
               Quick start →
