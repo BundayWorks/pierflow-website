@@ -51,15 +51,14 @@ export default function Page() {
 
       <H2 id="go-to-production">Go to production</H2>
       <Body>
-        When you&apos;re ready to switch from sandbox to production,{" "}
-        <Link
-          href="/developers/request-access"
-          className="text-accent-emerald underline"
-        >
-          request access
-        </Link>
-        . We&apos;ll review your integration and provision live keys, usually
-        within one business day.
+        Once you&apos;re ready to switch from sandbox to live, head to your{" "}
+        <Link href="/portal" className="text-accent-emerald underline">
+          partner console
+        </Link>{" "}
+        and click <em>Request production access</em>. You&apos;ll be asked to
+        complete a short checklist (DPA, security questionnaire, a verified
+        sandbox call). We&apos;ll review and provision live keys, usually within
+        one business day.
       </Body>
 
       <PrevNext prev={prev} next={next} />

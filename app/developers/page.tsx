@@ -89,10 +89,10 @@ export default function DevelopersPage() {
           </ol>
           <div className="mt-10 flex flex-wrap gap-3">
             <Link
-              href="/developers/request-access"
+              href="/get-started"
               className="text-[13px] font-medium px-4 py-2.5 rounded-md bg-accent-teal text-white hover:opacity-90"
             >
-              Request API access
+              Get started
             </Link>
             <Link
               href="/docs/quickstart/introduction"

@@ -69,7 +69,7 @@ export default function Hero() {
             <Link href="/company/contact" className="pill-btn-light gradient-ring">
               Talk with our team
             </Link>
-            <Link href="/developers/request-access" className="pill-btn-dark gradient-ring">
+            <Link href="/get-started" className="pill-btn-dark gradient-ring">
               Start building
             </Link>
           </motion.div>

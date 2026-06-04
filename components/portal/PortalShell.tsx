@@ -19,7 +19,7 @@ type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  badgeKey?: "pendingAccessRequests";
+  badgeKey?: "partnersAwaitingReview";
 };
 
 const NAV: NavItem[] = [
@@ -28,10 +28,10 @@ const NAV: NavItem[] = [
   { label: "Review queue", href: "/portal/review", icon: FileCheck2 },
   { label: "Patients", href: "/portal/patients", icon: Users },
   {
-    label: "Access requests",
-    href: "/portal/access-requests",
+    label: "Partners",
+    href: "/portal/partners",
     icon: Inbox,
-    badgeKey: "pendingAccessRequests",
+    badgeKey: "partnersAwaitingReview",
   },
   { label: "Organization", href: "/portal/organization", icon: Building2 },
   { label: "Settings", href: "/portal/settings", icon: Settings },
@@ -39,12 +39,12 @@ const NAV: NavItem[] = [
 
 export default function PortalShell({
   children,
-  pendingAccessRequests = 0,
+  partnersAwaitingReview = 0,
 }: {
   children: React.ReactNode;
-  pendingAccessRequests?: number;
+  partnersAwaitingReview?: number;
 }) {
-  const badges = { pendingAccessRequests };
+  const badges = { partnersAwaitingReview };
   const pathname = usePathname() ?? "/portal";
 
   const isActive = (href: string) =>

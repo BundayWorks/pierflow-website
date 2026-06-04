@@ -20,10 +20,10 @@ export default function ContactBar() {
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <Link
-              href="/developers/request-access"
+              href="/get-started"
               className="pill-btn-dark gradient-ring"
             >
-              Get API access
+              Get started
             </Link>
             <Link
               href="/company/contact"

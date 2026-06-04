@@ -1,10 +1,10 @@
 /**
  * Email helper — Gmail SMTP via Nodemailer.
  *
- * For MVP we send a small number of transactional emails (access-request
- * approval, rejection, confirmation). Gmail SMTP is rate-limited to
- * ~500/day; that's fine for this volume. Switch to Resend later if
- * volume grows.
+ * For MVP we send a small number of transactional emails (signup
+ * confirmation, sandbox/production approvals + rejections). Gmail SMTP
+ * is rate-limited to ~500/day; that's fine for this volume. Switch to
+ * Resend later if volume grows.
  */
 import nodemailer from "nodemailer";
 
@@ -55,73 +55,59 @@ export async function sendMail(input: {
 
 /* ── Templates ────────────────────────────────────────────────── */
 
-export function accessRequestReceivedTemplate(input: {
+export function signupReceivedTemplate(input: {
   name: string;
   company: string;
+  portalUrl: string;
 }) {
   const text = `Hi ${input.name},
 
-Thanks for requesting access to the Pierflow Records API on behalf of ${input.company}.
+Welcome to Pierflow. Your partner account for ${input.company} has been created.
 
-We've received your request and a member of the team will review it within one business day. You'll receive an email with your sandbox credentials as soon as it's approved.
+You can sign in to the partner console anytime at ${input.portalUrl}. Right now your account is marked as awaiting sandbox approval — we'll review and let you know the moment your sandbox key is ready (usually within one business day).
 
-If you've got context to add — a deadline, a partner relationship you'd like us to know about, or a specific integration question — just reply to this email and it'll reach the right person.
+In the meantime, you can complete your company profile and read through the docs from the dashboard so you're ready to start integrating the moment we approve.
 
 — Pierflow`;
   return {
-    subject: "Your Pierflow access request",
+    subject: "Welcome to Pierflow",
     text,
   };
 }
 
-export function accessRequestApprovedTemplate(input: {
-  name: string;
+export function sandboxApprovedTemplate(input: {
   company: string;
   rawApiKey: string;
   docsUrl: string;
-  portalSignUpUrl?: string;
-  approvedEmail: string;
+  portalUrl: string;
 }) {
-  const signUpUrl =
-    input.portalSignUpUrl ?? "https://www.pierflow.com/portal/sign-up";
-
-  const text = `Hi ${input.name},
-
-Your Pierflow Records API access for ${input.company} has been approved.
+  const text = `Your Pierflow sandbox access for ${input.company} has been approved.
 
 Sandbox API key (sk_test_*):
 
   ${input.rawApiKey}
 
-Treat this like a password — Pierflow only stores its hash, so this is your single copy. Send it in the Authorization header on every request:
+Treat this like a password — Pierflow only stores its hash, so this is your single copy. The same key is also visible in your partner console under API keys.
+
+Use it in the Authorization header on every request:
 
   curl -H "Authorization: Bearer ${input.rawApiKey}" https://www.pierflow.com/v1/organizations
 
 Quick start: ${input.docsUrl}
-
-You can also manage your keys, rotate credentials, and view usage in the partner portal:
-
-  1. Sign up at ${signUpUrl} using this email address: ${input.approvedEmail}
-  2. You'll land directly in your partner workspace — no extra setup required.
-
-If anything looks off, reply to this email and we'll sort it.
+Partner console: ${input.portalUrl}
 
 — Pierflow`;
-
   return {
-    subject: "Pierflow Records API — access approved",
+    subject: "Pierflow sandbox access — approved",
     text,
   };
 }
 
-export function accessRequestRejectedTemplate(input: {
-  name: string;
+export function sandboxRejectedTemplate(input: {
   company: string;
   reason: string;
 }) {
-  const text = `Hi ${input.name},
-
-We've reviewed your request for Pierflow Records API access on behalf of ${input.company}, and unfortunately we're not able to approve it right now.
+  const text = `We've reviewed your Pierflow partner account for ${input.company}, and unfortunately we're not able to grant sandbox access right now.
 
 Reason: ${input.reason}
 
@@ -129,7 +115,48 @@ If circumstances change or you'd like to discuss further, reply to this email.
 
 — Pierflow`;
   return {
-    subject: "Pierflow access request — update",
+    subject: "Pierflow access — update",
+    text,
+  };
+}
+
+export function productionApprovedTemplate(input: {
+  company: string;
+  portalUrl: string;
+}) {
+  const text = `Your Pierflow production access for ${input.company} is now approved.
+
+You can now issue live API keys (pf_live_sk_*) from the partner console at:
+
+  ${input.portalUrl}
+
+Live keys carry the same Authorization-header semantics as sandbox keys but call against real organisation data. Please rotate any test keys you embedded in production by accident.
+
+— Pierflow`;
+  return {
+    subject: "Pierflow production access — approved",
+    text,
+  };
+}
+
+export function productionRejectedTemplate(input: {
+  company: string;
+  reason: string;
+  portalUrl: string;
+}) {
+  const text = `We've reviewed your production access request for ${input.company} and need a few more things before we can approve it.
+
+Reviewer notes:
+
+${input.reason}
+
+Your sandbox access is still active. Once you've addressed the items above, you can re-submit from the partner console:
+
+  ${input.portalUrl}
+
+— Pierflow`;
+  return {
+    subject: "Pierflow production access — needs follow-up",
     text,
   };
 }

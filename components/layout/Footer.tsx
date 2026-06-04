@@ -35,7 +35,7 @@ const COLUMNS: { heading: string; links: { label: string; href: string }[] }[] =
         { label: "Quick start", href: "/docs/quickstart/introduction" },
         { label: "API reference", href: "/docs" },
         { label: "AI capabilities", href: "/developers/ai-capabilities" },
-        { label: "Request access", href: "/developers/request-access" },
+        { label: "Get started", href: "/get-started" },
         { label: "Changelog", href: "/docs/changelog" },
         { label: "Status", href: "/status" },
       ],

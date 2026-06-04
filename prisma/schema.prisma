@@ -139,6 +139,20 @@ enum PartnerType {
   OTHER
 }
 
+// Lifecycle of a Partner from sign-up to live access.
+//   PENDING_SANDBOX     — signed up, awaiting Pierflow approval to test
+//   SANDBOX             — sandbox key issued, can make test calls
+//   PRODUCTION_REQUESTED — checklist complete, asked for live access
+//   PRODUCTION          — live keys may be issued
+//   SUSPENDED           — disabled for cause (kept distinct from isActive)
+enum PartnerAccessStatus {
+  PENDING_SANDBOX
+  SANDBOX
+  PRODUCTION_REQUESTED
+  PRODUCTION
+  SUSPENDED
+}
+
 model Partner {
   id          String      @id @default(cuid())
   name        String
@@ -147,6 +161,22 @@ model Partner {
   // Optional public-facing logo / website
   websiteUrl  String?
   isActive    Boolean     @default(true)
+
+  // Onboarding context captured at sign-up — feeds the staff inbox so
+  // reviewers can triage without round-tripping the partner.
+  primaryUseCase  String?
+  expectedVolume  String?
+  timeline        String?
+  country         String?  @default("NG")
+
+  accessStatus            PartnerAccessStatus @default(PENDING_SANDBOX)
+  sandboxApprovedAt       DateTime?
+  sandboxApprovedBy       String?  // Clerk user id of approver
+  productionRequestedAt   DateTime?
+  productionApprovedAt    DateTime?
+  productionApprovedBy    String?
+  reviewerNotes           String?  @db.Text
+
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
@@ -154,10 +184,70 @@ model Partner {
   organizationLinks   PartnerOrganizationLink[]
   importPackages      ImportPackage[]
   webhookEndpoints    WebhookEndpoint[]
-  accessRequests      AccessRequest[]
   users               PartnerUser[]
+  profile             PartnerProfile?
+  agreements          PartnerAgreement[]
+  securityAssessment  PartnerSecurityAssessment?
 
+  @@index([accessStatus])
   @@map("partners")
+}
+
+// One-to-one profile data the partner completes themselves.
+model PartnerProfile {
+  partnerId          String   @id
+  legalName          String?
+  registeredAddress  String?
+  contactPhone       String?
+  completedAt        DateTime?
+  updatedAt          DateTime @updatedAt
+
+  partner            Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@map("partner_profiles")
+}
+
+enum AgreementKind {
+  DPA
+  TOS
+}
+
+// Append-only record of click-to-sign agreements. We never overwrite —
+// re-signing creates a new row so we can audit history.
+model PartnerAgreement {
+  id            String        @id @default(cuid())
+  partnerId     String
+  kind          AgreementKind
+  signedAt      DateTime      @default(now())
+  signedByExternalId String   // Clerk user id of the signer
+  signedByEmail String
+  signedByName  String?
+  documentVersion String      // e.g. "dpa-2026-06-04"
+  ipAddress     String?
+  userAgent     String?       @db.Text
+
+  partner       Partner       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId, kind])
+  @@map("partner_agreements")
+}
+
+// One-to-one security questionnaire. Re-submitting overwrites.
+model PartnerSecurityAssessment {
+  partnerId           String   @id
+  dataResidency       String?  // "ng" | "eu" | "us" | "other"
+  retentionDays       Int?
+  accessControlNotes  String?  @db.Text
+  encryptsAtRest      Boolean  @default(false)
+  encryptsInTransit   Boolean  @default(false)
+  hasIncidentResponse Boolean  @default(false)
+  hasNda              Boolean  @default(false)
+  completedAt         DateTime?
+  updatedAt           DateTime @updatedAt
+
+  partner             Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@map("partner_security_assessments")
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -189,50 +279,6 @@ model PartnerUser {
   @@index([partnerId])
   @@index([email])
   @@map("partner_users")
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Access requests — submitted via the public /developers/request-access
-// form, reviewed inside the portal at /portal/access-requests.
-// ─────────────────────────────────────────────────────────────────────
-
-enum AccessRequestStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  WITHDRAWN
-}
-
-model AccessRequest {
-  id                 String              @id @default(cuid())
-  name               String
-  email              String
-  company            String
-  websiteUrl         String?
-  useCase            String              @db.Text
-  expectedVolume     String?
-  partnerType        PartnerType         @default(OTHER)
-  status             AccessRequestStatus @default(PENDING)
-
-  // Set when approved — points at the provisioned Partner.
-  approvedPartnerId  String?
-  approvedPartner    Partner?            @relation(fields: [approvedPartnerId], references: [id])
-  approvedApiKeyLast4 String?            // for the reviewer to recognise which key was issued
-
-  reviewerExternalId String?             // Clerk user id of approver / rejecter
-  reviewedAt         DateTime?
-  reviewerNotes      String?             @db.Text
-
-  // Anti-spam diagnostics
-  ipAddress          String?
-  userAgent          String?
-
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-
-  @@index([status, createdAt])
-  @@index([email])
-  @@map("access_requests")
 }
 
 model PartnerApiKey {

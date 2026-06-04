@@ -87,8 +87,8 @@ export default function DocsHome() {
             icon: <TerminalSquare size={14} />,
           },
           {
-            label: "Request API access",
-            href: "/developers/request-access",
+            label: "Get started",
+            href: "/get-started",
             icon: <BookOpen size={14} />,
           },
         ]}

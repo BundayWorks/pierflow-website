@@ -17,7 +17,7 @@ export default function ApiKeysCta() {
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <Link
-              href="/developers/request-access"
+              href="/get-started"
               className="pill-btn-light gradient-ring"
             >
               Get the API keys

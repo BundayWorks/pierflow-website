@@ -50,10 +50,10 @@ export default function DocsTopbar({
               Pierflow.com <ArrowUpRight size={13} />
             </Link>
             <Link
-              href="/developers/request-access"
+              href="/get-started"
               className="text-[13px] font-medium px-4 py-2 rounded-full bg-accent-ink text-white hover:opacity-95"
             >
-              Get API access
+              Get started
             </Link>
             <button
               aria-label="Toggle docs menu"

@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
-import { Key, BookOpen, BarChart3, type LucideIcon } from "lucide-react";
+import {
+  Home,
+  Key,
+  BookOpen,
+  BarChart3,
+  type LucideIcon,
+} from "lucide-react";
 import Logo from "@/components/shared/Logo";
 
 type NavItem = {
@@ -14,6 +20,7 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
+  { label: "Overview", href: "/portal/overview", icon: Home },
   { label: "API keys", href: "/portal/keys", icon: Key },
   { label: "Usage", href: "/portal/usage", icon: BarChart3 },
   {
@@ -31,7 +38,7 @@ export default function PartnerShell({
   children: React.ReactNode;
   partnerName: string;
 }) {
-  const pathname = usePathname() ?? "/portal/keys";
+  const pathname = usePathname() ?? "/portal/overview";
 
   const isActive = (href: string) =>
     href.startsWith("/portal") && pathname.startsWith(href);
@@ -40,7 +47,7 @@ export default function PartnerShell({
     <div className="min-h-screen bg-white">
       <header className="sticky top-0 z-30 bg-white border-b border-black/[0.06]">
         <div className="max-w-[1400px] mx-auto px-4 lg:px-6 h-[60px] flex items-center justify-between gap-4">
-          <Link href="/portal/keys" className="flex items-center gap-2">
+          <Link href="/portal/overview" className="flex items-center gap-2">
             <Logo variant="dark" size="sm" />
             <span className="text-[14px] text-accent-ink/55 ml-1 hidden sm:inline">
               Partners

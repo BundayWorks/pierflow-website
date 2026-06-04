@@ -24,7 +24,7 @@ export default function DevCta() {
               Quick start →
             </Link>
             <Link
-              href="/developers/request-access"
+              href="/get-started"
               className="text-[13px] font-medium px-4 py-2.5 rounded-md border border-white/20 text-white hover:bg-white/5"
             >
               Try sandbox

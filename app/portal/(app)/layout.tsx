@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import PortalShell from "@/components/portal/PortalShell";
 import { resolveSession } from "@/lib/auth";
-import { countPendingAccessRequests } from "./access-requests/actions";
+import { countPartnersAwaitingReview } from "./partners/actions";
 
 export default async function StaffLayout({
   children,
@@ -12,12 +12,12 @@ export default async function StaffLayout({
   // them to the right place (partner shell, pending page, or sign-in).
   const session = await resolveSession();
   if (session.kind === "anonymous") redirect("/portal/sign-in");
-  if (session.kind === "partner") redirect("/portal/keys");
+  if (session.kind === "partner") redirect("/portal/overview");
   if (session.kind === "unlinked") redirect("/portal/pending");
 
-  const pendingAccessRequests = await countPendingAccessRequests();
+  const partnersAwaitingReview = await countPartnersAwaitingReview();
   return (
-    <PortalShell pendingAccessRequests={pendingAccessRequests}>
+    <PortalShell partnersAwaitingReview={partnersAwaitingReview}>
       {children}
     </PortalShell>
   );

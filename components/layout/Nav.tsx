@@ -74,16 +74,10 @@ export default function Nav() {
               Log in
             </Link>
             <Link
-              href="/company/contact"
-              className="text-[14px] px-4 py-2 rounded-full border border-accent-ink/15 text-accent-ink hover:bg-black/[0.04]"
-            >
-              Talk to us
-            </Link>
-            <Link
-              href="/developers/request-access"
+              href="/get-started"
               className="gradient-ring text-[14px] px-4 py-2 rounded-full bg-accent-ink text-white hover:opacity-95"
             >
-              Get API access
+              Get started
             </Link>
           </div>
 
@@ -163,11 +157,11 @@ export default function Nav() {
                 Log in
               </Link>
               <Link
-                href="/developers/request-access"
+                href="/get-started"
                 className="mt-2 text-center text-[14px] px-4 py-2.5 rounded-full bg-accent-ink text-white"
                 onClick={() => setMobileOpen(false)}
               >
-                Get API access
+                Get started
               </Link>
             </div>
           </div>

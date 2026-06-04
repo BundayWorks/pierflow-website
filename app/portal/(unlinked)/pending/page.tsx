@@ -6,17 +6,23 @@ import { db } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export default async function PendingPage() {
-  // Layout guarantees this is an unlinked session, but we re-read it
-  // here so we can show the user's email and surface any in-flight
-  // access request they already submitted.
+  // The layout guarantees this is an unlinked session. We still need
+  // the email so we can show it and check for an existing Partner the
+  // user might be entitled to but isn't linked to.
   const session = await resolveSession();
   const email = session.kind === "unlinked" ? session.email : null;
 
-  const pendingRequest = email
-    ? await db.accessRequest.findFirst({
-        where: { email, status: "PENDING" },
-        select: { id: true, company: true, createdAt: true },
-        orderBy: { createdAt: "desc" },
+  // Hand-curated edge case: if there's a PartnerUser row with this
+  // email but the externalId is null, resolveSession() would have
+  // bound it already. So if we're still here with this email matching,
+  // it usually means the user signed up with a slightly different
+  // email than the one they used in /get-started.
+  const partnerByEmail = email
+    ? await db.partnerUser.findFirst({
+        where: { email },
+        select: {
+          partner: { select: { name: true, accessStatus: true } },
+        },
       })
     : null;
 
@@ -24,38 +30,36 @@ export default async function PendingPage() {
     <div>
       <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-accent-emerald font-medium">
         <Clock size={12} />
-        Account pending
+        Account not linked
       </span>
       <h1 className="mt-3 font-display text-[36px] md:text-[44px] leading-[1.05] tracking-[-0.02em] text-accent-ink font-medium">
-        Your account isn&apos;t linked to a Pierflow workspace yet.
+        We can&apos;t find a partner account linked to this email.
       </h1>
       <p className="mt-4 text-[15px] leading-[1.7] text-accent-ink/65 max-w-[640px]">
-        Access to the Pierflow portal is granted on a per-partner basis. If you
-        represent an EMR, HMS, insurer, or analytics platform that wants to
-        consume health records via our API, request access below and our team
-        will review and provision your credentials.
+        The portal links accounts by the email you used at sign-up. If you
+        already created a Pierflow partner account, sign in with the same
+        email you used then. Otherwise, get started below.
       </p>
 
-      {pendingRequest ? (
-        <div className="mt-8 rounded-2xl border border-[#fff4d4] bg-[#fffaee] p-5">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-[#7a4a00] font-medium">
-            Request received
+      {partnerByEmail ? (
+        <div className="mt-8 rounded-2xl border border-card-mint bg-card-mint p-5">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-accent-emerald font-medium">
+            Existing partner account
           </p>
           <p className="mt-2 text-[14px] text-accent-ink leading-[1.6]">
-            We have a pending access request on file from{" "}
-            <strong>{pendingRequest.company}</strong>, submitted{" "}
-            {new Date(pendingRequest.createdAt).toLocaleDateString()}. You&apos;ll
-            get an email at <code className="text-[12px]">{email}</code> as soon
-            as it&apos;s reviewed.
+            We have a partner account on file for{" "}
+            <strong>{partnerByEmail.partner.name}</strong> tied to{" "}
+            <code className="text-[12px]">{email}</code>. Sign out and back in
+            with that email to access it.
           </p>
         </div>
       ) : (
         <div className="mt-8 flex flex-wrap gap-3">
           <Link
-            href="/developers/request-access"
+            href="/get-started"
             className="text-[13px] font-medium px-4 py-2.5 rounded-md bg-accent-ink text-white hover:opacity-90 inline-flex items-center gap-2"
           >
-            Request access
+            Get started
             <ArrowRight size={14} />
           </Link>
           <Link
@@ -68,14 +72,7 @@ export default async function PendingPage() {
       )}
 
       <p className="mt-10 text-[12px] text-accent-ink/55 leading-[1.65]">
-        Already approved but still seeing this page? The portal links accounts
-        by the email you signed up with. Make sure you&apos;re signed in with{" "}
-        {email ? (
-          <code className="text-[12px]">{email}</code>
-        ) : (
-          "the same email you used on the access request"
-        )}
-        , or contact us at{" "}
+        Still stuck? Contact us at{" "}
         <a
           href="mailto:pierflowllc@gmail.com"
           className="text-accent-emerald hover:underline"

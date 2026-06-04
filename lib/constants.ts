@@ -182,9 +182,9 @@ export const NAV_ITEMS: NavMenu[] = [
             desc: "Inline scores, auditable, explainable.",
           },
           {
-            label: "Request access",
-            href: "/developers/request-access",
-            desc: "Sandbox credentials, same business day.",
+            label: "Get started",
+            href: "/get-started",
+            desc: "Create a sandbox account in minutes.",
           },
           {
             label: "Changelog",

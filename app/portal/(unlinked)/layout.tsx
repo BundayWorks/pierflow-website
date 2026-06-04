@@ -12,7 +12,7 @@ export default async function UnlinkedLayout({
   const session = await resolveSession();
   if (session.kind === "anonymous") redirect("/portal/sign-in");
   if (session.kind === "staff") redirect("/portal");
-  if (session.kind === "partner") redirect("/portal/keys");
+  if (session.kind === "partner") redirect("/portal/overview");
 
   return (
     <div className="min-h-screen bg-white">
