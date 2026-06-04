@@ -70,10 +70,15 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
   const firstName = nameParts[0] ?? "";
   const lastName = nameParts.slice(1).join(" ") || undefined;
 
+  // Create the Clerk user without an email first. If we passed the
+  // email to createUser, Clerk would mark it verified and refuse to
+  // unverify a primary email — that breaks the OTP verification gate
+  // on the dashboard. Adding the email as a separate step lets us set
+  // verified=false from the start, so the partner has to confirm
+  // ownership by entering a 6-digit code.
   let clerkUserId: string;
   try {
     const user = await clerk.users.createUser({
-      emailAddress: [email],
       firstName: firstName || undefined,
       lastName,
       skipPasswordRequirement: true,
@@ -81,6 +86,22 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
     });
     clerkUserId = user.id;
   } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown Clerk error";
+    return { ok: false, reason: "CLERK_ERROR", message };
+  }
+
+  try {
+    await clerk.emailAddresses.createEmailAddress({
+      userId: clerkUserId,
+      emailAddress: email,
+      verified: false,
+      primary: true,
+    });
+  } catch (err) {
+    // Roll back the dangling user so we don't leave a partial account.
+    try {
+      await clerk.users.deleteUser(clerkUserId);
+    } catch {}
     const message = err instanceof Error ? err.message : "Unknown Clerk error";
     return { ok: false, reason: "CLERK_ERROR", message };
   }

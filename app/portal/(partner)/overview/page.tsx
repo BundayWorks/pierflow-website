@@ -1,4 +1,3 @@
-import { currentUser } from "@clerk/nextjs/server";
 import { requirePartnerUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { buildChecklist } from "@/lib/partnerChecklist";
@@ -8,32 +7,38 @@ export const dynamic = "force-dynamic";
 
 export default async function PartnerOverviewPage() {
   const { partner: sessionPartner } = await requirePartnerUser();
-  const [partner, user] = await Promise.all([
-    db.partner.findUnique({
-      where: { id: sessionPartner.id },
-      include: {
-        users: {
-          select: { joinedAt: true, externalId: true, email: true },
+  const partner = await db.partner.findUnique({
+    where: { id: sessionPartner.id },
+    include: {
+      users: {
+        select: {
+          joinedAt: true,
+          externalId: true,
+          email: true,
+          emailVerifiedAt: true,
         },
-        apiKeys: {
-          select: { id: true, lastUsedAt: true, revokedAt: true, last4: true, label: true, createdAt: true },
-        },
-        agreements: { select: { kind: true, signedAt: true } },
-        profile: true,
-        securityAssessment: true,
       },
-    }),
-    currentUser(),
-  ]);
+      apiKeys: {
+        select: {
+          id: true,
+          lastUsedAt: true,
+          revokedAt: true,
+          last4: true,
+          label: true,
+          createdAt: true,
+        },
+      },
+      agreements: { select: { kind: true, signedAt: true } },
+      profile: true,
+      securityAssessment: true,
+    },
+  });
 
   if (!partner) {
     throw new Error("PARTNER_NOT_FOUND");
   }
 
-  const emailVerified =
-    user?.primaryEmailAddress?.verification?.status === "verified";
-
-  const checklist = buildChecklist(partner, emailVerified);
+  const checklist = buildChecklist(partner);
 
   return (
     <OverviewClient

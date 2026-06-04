@@ -37,16 +37,16 @@ export type ChecklistState = {
 };
 
 export type PartnerForChecklist = Partner & {
-  users: Pick<PartnerUser, "joinedAt" | "externalId">[];
+  users: Pick<PartnerUser, "joinedAt" | "externalId" | "emailVerifiedAt">[];
   apiKeys: Pick<PartnerApiKey, "lastUsedAt" | "revokedAt">[];
   agreements: Pick<PartnerAgreement, "kind">[];
   securityAssessment: Pick<PartnerSecurityAssessment, "completedAt"> | null;
 };
 
-export function buildChecklist(
-  partner: PartnerForChecklist,
-  emailVerified: boolean,
-): ChecklistState {
+export function buildChecklist(partner: PartnerForChecklist): ChecklistState {
+  const emailVerified = partner.users.some(
+    (u) => u.emailVerifiedAt != null,
+  );
   const sandboxApproved =
     partner.accessStatus !== "PENDING_SANDBOX" &&
     partner.accessStatus !== "SUSPENDED";

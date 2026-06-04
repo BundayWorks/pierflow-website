@@ -272,6 +272,11 @@ model PartnerUser {
   isActive    Boolean         @default(true)
   invitedAt   DateTime        @default(now())
   joinedAt    DateTime?
+  // We track verification ourselves because Clerk's admin-create path
+  // marks the email verified by default and Clerk refuses to unverify
+  // a user's only/primary email. The dashboard verification widget
+  // sets this when the partner enters a 6-digit code we sent them.
+  emailVerifiedAt DateTime?
 
   partner     Partner         @relation(fields: [partnerId], references: [id], onDelete: Cascade)
 

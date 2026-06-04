@@ -9,6 +9,34 @@ import { requirePartnerUser } from "@/lib/auth";
 
 const DPA_DOCUMENT_VERSION = "dpa-2026-06-04";
 
+/* ── Email verification ───────────────────────────────────────── */
+
+/**
+ * Marks the current PartnerUser row as email-verified.
+ *
+ * Called by the dashboard verification widget after Clerk's
+ * attemptVerification confirms the 6-digit code matches. We
+ * deliberately re-check on the server: Clerk's user object is fetched
+ * fresh, and the email must be currently `verified` in Clerk before we
+ * set our column. This stops a malicious client from skipping the
+ * code step and just calling the action.
+ */
+export async function markEmailVerified() {
+  const { partnerUser } = await requirePartnerUser();
+  const user = await currentUser();
+  const verified =
+    user?.primaryEmailAddress?.verification?.status === "verified";
+  if (!verified) {
+    throw new Error("EMAIL_NOT_VERIFIED_WITH_CLERK");
+  }
+  await db.partnerUser.update({
+    where: { id: partnerUser.id },
+    data: { emailVerifiedAt: new Date() },
+  });
+  revalidatePath("/portal/overview");
+  return { ok: true };
+}
+
 /* ── Profile ──────────────────────────────────────────────────── */
 
 const ProfileInput = z.object({

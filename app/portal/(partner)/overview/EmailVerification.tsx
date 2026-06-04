@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { Mail, Check, AlertCircle } from "lucide-react";
+import { markEmailVerified } from "./actions";
 
 /**
  * Email verification widget for the partner dashboard checklist.
@@ -43,15 +44,6 @@ export default function EmailVerification() {
     );
   }
 
-  if (primary.verification?.status === "verified") {
-    return (
-      <p className="mt-4 text-[12px] text-accent-emerald inline-flex items-center gap-1.5">
-        <Check size={13} />
-        Verified — nothing more to do here.
-      </p>
-    );
-  }
-
   async function handleSend() {
     if (!primary) return;
     setBusy(true);
@@ -60,11 +52,8 @@ export default function EmailVerification() {
       await primary.prepareVerification({ strategy: "email_code" });
       setPhase("sent");
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to send code. Try again in a moment.",
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Failed to send code. Try again in a moment.");
     } finally {
       setBusy(false);
     }
@@ -77,10 +66,11 @@ export default function EmailVerification() {
     try {
       const result = await primary.attemptVerification({ code: code.trim() });
       if (result.verification?.status === "verified") {
+        // Persist Pierflow-side verification (Clerk by itself isn't
+        // enough — we track it on PartnerUser).
+        await markEmailVerified();
         setPhase("idle");
         setCode("");
-        // Pull fresh user state from Clerk so the next render of the
-        // page reads the new "verified" status.
         await user?.reload();
         router.refresh();
       } else {
