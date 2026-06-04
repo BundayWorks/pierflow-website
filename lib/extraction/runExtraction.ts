@@ -1,7 +1,7 @@
 /**
  * Run extraction for a single ProcessingJob: pull its source asset,
- * call Haiku, persist the result as an ExtractedRecord, and advance
- * the job's status. Idempotent — safe to call again on a job that's
+ * call Haiku, map to FHIR R4, validate, and persist the result as an
+ * ExtractedRecord. Idempotent — safe to call again on a job that's
  * already PROCESSING.
  *
  * Designed to be invoked as a fire-and-forget step right after the
@@ -11,6 +11,9 @@
 
 import { db } from "@/lib/db";
 import { extractPage } from "./extract";
+import { buildFhirBundle, type ExtractedJson } from "@/lib/fhir/mapper";
+import { validateExtraction } from "@/lib/validate/rules";
+import type { RecordValidationStatus } from "@prisma/client";
 
 export async function runExtractionForJob(jobId: string): Promise<void> {
   // Atomic claim — only one worker can advance a QUEUED job at a time.
@@ -29,7 +32,7 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
       sourceAsset: true,
       recordTypeHint: true,
       pageCount: true,
-      organization: { select: { name: true } },
+      organization: { select: { id: true, name: true } },
     },
   });
   if (!job) return;
@@ -44,38 +47,71 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
   }
 
   try {
+    // 1. Extract structured JSON from the image.
     const result = await extractPage({
       imageUrl: src.secureUrl,
       hint: job.recordTypeHint,
       facilityName: job.organization?.name,
     });
 
-    await db.extractedRecord.create({
-      data: {
-        jobId: job.id,
-        organizationId: job.organizationId,
-        documentType: job.recordTypeHint,
-        pageNumbers: Array.from({ length: job.pageCount }, (_, i) => i + 1),
-        extractedJson: result.data as object,
-        avgConfidence: result.avgConfidence,
-        lowConfidenceFields: result.lowConfidenceFields as object,
-        validationStatus:
-          result.avgConfidence >= 0.85
-            ? "AUTO_APPROVED"
-            : result.lowConfidenceFields.length > 0
-              ? "REVIEW_REQUIRED"
-              : "PENDING",
+    const extractedData = result.data as ExtractedJson;
+
+    // 2. Map to FHIR R4 — defensive, accepts partial input.
+    const fhir = buildFhirBundle({
+      data: extractedData,
+      documentType: job.recordTypeHint,
+      organization: {
+        id: job.organization?.id ?? job.organizationId,
+        name: job.organization?.name ?? "Unknown organization",
       },
     });
 
-    await db.processingJob.update({
-      where: { id: job.id },
-      data: {
-        status:
-          result.avgConfidence >= 0.85 ? "VALIDATED" : "AWAITING_REVIEW",
-        completedAt: new Date(),
-      },
+    // 3. Validate: required fields, clinical consistency, completeness.
+    const validation = validateExtraction({
+      data: extractedData,
+      avgConfidence: result.avgConfidence,
     });
+
+    // 4. Decide the next state. Validator's disposition is authoritative —
+    //    it already considered both completeness and error severity.
+    const validationStatus: RecordValidationStatus =
+      validation.disposition === "AUTO_APPROVE"
+        ? "AUTO_APPROVED"
+        : "REVIEW_REQUIRED";
+
+    const jobStatus =
+      validation.disposition === "AUTO_APPROVE"
+        ? "VALIDATED"
+        : "AWAITING_REVIEW";
+
+    // Persist the record and advance the job in one round-trip.
+    await db.$transaction([
+      db.extractedRecord.create({
+        data: {
+          jobId: job.id,
+          organizationId: job.organizationId,
+          documentType: job.recordTypeHint,
+          pageNumbers: Array.from({ length: job.pageCount }, (_, i) => i + 1),
+          extractedJson: result.data as object,
+          fhirBundle: fhir as unknown as object,
+          completenessScore: validation.completenessScore,
+          avgConfidence: result.avgConfidence,
+          lowConfidenceFields: {
+            confidence: result.lowConfidenceFields,
+            validation: validation.issues,
+            disposition: validation.disposition,
+          } as object,
+          validationStatus,
+        },
+      }),
+      db.processingJob.update({
+        where: { id: job.id },
+        data: {
+          status: jobStatus,
+          completedAt: new Date(),
+        },
+      }),
+    ]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await markFailed(jobId, "EXTRACTION_FAILED", message);
