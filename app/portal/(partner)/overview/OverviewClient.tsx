@@ -20,7 +20,6 @@ import {
   saveSecurityAssessment,
   requestProductionAccess,
 } from "./actions";
-import EmailVerification from "./EmailVerification";
 
 type PartnerInfo = {
   id: string;
@@ -368,7 +367,12 @@ function ChecklistDetail({
   }
 
   if (item === "emailVerified") {
-    return <EmailVerification />;
+    return (
+      <p className="mt-4 text-[12px] text-accent-ink/55 leading-[1.65]">
+        Email ownership was confirmed when you accepted your Pierflow
+        invitation. Nothing more to do here.
+      </p>
+    );
   }
 
   if (item === "firstApiCall") {

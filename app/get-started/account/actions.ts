@@ -40,7 +40,7 @@ const SignupSchema = z.object({
 });
 
 export type SignupActionResult =
-  | { ok: true; signInToken: string }
+  | { ok: true; email: string }
   | { ok: false; error: "EMAIL_TAKEN" }
   | { ok: false; error: "VALIDATION_ERROR"; message: string }
   | { ok: false; error: "SERVER_ERROR"; message: string };
@@ -61,7 +61,7 @@ export async function submitSignup(
 
   // Honeypot: silently return success-ish to bots so they can't tune.
   if (parsed.company_url && parsed.company_url.trim().length > 0) {
-    return { ok: true, signInToken: "" };
+    return { ok: true, email: parsed.email };
   }
 
   if (!PARTNER_TYPES.includes(parsed.partnerType)) {
@@ -91,7 +91,7 @@ export async function submitSignup(
       console.error("[signup] Clerk error:", result.message);
       return { ok: false, error: "SERVER_ERROR", message: result.message };
     }
-    return { ok: true, signInToken: result.signInToken };
+    return { ok: true, email: result.email };
   } catch (err) {
     console.error("[signup] unexpected:", err);
     const message = err instanceof Error ? err.message : "Unknown error";

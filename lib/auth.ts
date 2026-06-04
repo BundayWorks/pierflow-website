@@ -230,10 +230,16 @@ async function resolvePartnerUser(input: {
   if (!invited) return null;
   if (!invited.partner.isActive) return null;
 
-  // Bind the Clerk user to the invited PartnerUser row.
+  // Bind the Clerk user to the invited PartnerUser row. Accepting
+  // the Clerk invitation proved email ownership, so tick our
+  // emailVerifiedAt column at the same moment we bind.
   const bound = await db.partnerUser.update({
     where: { id: invited.id },
-    data: { externalId: input.externalId, joinedAt: new Date() },
+    data: {
+      externalId: input.externalId,
+      joinedAt: new Date(),
+      emailVerifiedAt: invited.emailVerifiedAt ?? new Date(),
+    },
   });
   return { partnerUser: bound, partner: invited.partner };
 }

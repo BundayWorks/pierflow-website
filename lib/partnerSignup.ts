@@ -1,21 +1,28 @@
 /**
- * Partner sign-up: provisions a Clerk user + Partner + PartnerUser
- * record from the /get-started flow. The new Partner starts at
- * PENDING_SANDBOX — sandbox API key is issued only when Pierflow staff
- * approve, and the Partner can sign in to the portal immediately to
- * see the dashboard checklist and complete profile/security tasks.
+ * Partner sign-up: provisions a Partner + PartnerUser record from the
+ * /get-started flow and sends a Clerk invitation email so the partner
+ * can set a password on Clerk's hosted page. Email verification is
+ * implicit in accepting the invitation, so we don't need a separate
+ * OTP step on the dashboard.
  *
- * Email collision policy: if a Clerk user already exists with the
- * given email, we block the sign-up and ask them to log in.
+ * The new Partner starts at PENDING_SANDBOX — the sandbox API key is
+ * still only issued after Pierflow staff approval, but once the partner
+ * accepts the invite they can sign in immediately and see the dashboard
+ * checklist while we review.
+ *
+ * Email collision policy: if a Clerk user OR a pending invitation
+ * already exists for the email, block sign-up and ask them to log in.
  */
 import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { sendMail, signupReceivedTemplate } from "@/lib/email";
 import type { PartnerType } from "@prisma/client";
 
-const PORTAL_URL =
-  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") + "/portal" ||
-  "https://www.pierflow.com/portal";
+function portalUrl(): string {
+  const base =
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+    "https://www.pierflow.com";
+  return `${base}/portal`;
+}
 
 export type SignupInput = {
   // Step 1
@@ -36,9 +43,7 @@ export type SignupResult =
   | {
       ok: true;
       partnerId: string;
-      clerkUserId: string;
-      // Single-use ticket Clerk gives us for auto-sign-in after signup.
-      signInToken: string;
+      email: string;
     }
   | {
       ok: false;
@@ -54,65 +59,37 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
   const email = input.email.trim().toLowerCase();
   const clerk = await clerkClient();
 
-  // ── Email collision guard ──────────────────────────────────────
-  // If a Clerk user already exists with this email, refuse — let
-  // them log in instead.
-  const existing = await clerk.users.getUserList({
+  // ── Collision guards ────────────────────────────────────────────
+  // Block if a Clerk user already exists, or if an unaccepted
+  // invitation is already pending.
+  const existingUsers = await clerk.users.getUserList({
     emailAddress: [email],
     limit: 1,
   });
-  if (existing.data.length > 0) {
+  if (existingUsers.data.length > 0) {
     return { ok: false, reason: "EMAIL_ALREADY_REGISTERED" };
   }
+  try {
+    const pending = await clerk.invitations.getInvitationList({
+      status: "pending",
+      query: email,
+      limit: 5,
+    });
+    const match = pending.data.find(
+      (inv) => inv.emailAddress.toLowerCase() === email,
+    );
+    if (match) {
+      return { ok: false, reason: "EMAIL_ALREADY_REGISTERED" };
+    }
+  } catch {
+    // Non-fatal — if invitations API fails we fall through and let
+    // Clerk's createInvitation surface a duplicate error below.
+  }
 
-  // ── Create the Clerk user ──────────────────────────────────────
+  // ── Provision the Partner record (no Clerk user yet) ────────────
   const nameParts = input.fullName.trim().split(/\s+/);
   const firstName = nameParts[0] ?? "";
-  const lastName = nameParts.slice(1).join(" ") || undefined;
 
-  // Create the Clerk user with the email. Clerk's admin-create flow
-  // marks the email verified by default. Immediately walk that back
-  // via updateEmailAddress so the dashboard OTP flow can send a code
-  // and verify ownership for real.
-  let clerkUserId: string;
-  let primaryEmailId: string | null = null;
-  try {
-    const user = await clerk.users.createUser({
-      emailAddress: [email],
-      firstName: firstName || undefined,
-      lastName,
-      skipPasswordRequirement: true,
-      skipPasswordChecks: true,
-    });
-    clerkUserId = user.id;
-    primaryEmailId =
-      user.emailAddresses.find(
-        (e) => e.emailAddress.toLowerCase() === email,
-      )?.id ?? null;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown Clerk error";
-    console.error("[signup] createUser failed:", message);
-    return { ok: false, reason: "CLERK_ERROR", message };
-  }
-
-  if (primaryEmailId) {
-    try {
-      await clerk.emailAddresses.updateEmailAddress(primaryEmailId, {
-        verified: false,
-      });
-    } catch (err) {
-      // If Clerk refuses (e.g. "primary must be verified"), we leave
-      // the email verified and rely on PartnerUser.emailVerifiedAt
-      // for the gate. The dashboard widget will show
-      // "already verified" and we'll handle that case there.
-      console.warn(
-        "[signup] could not unverify email:",
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  }
-
-  // ── Provision the Partner record ───────────────────────────────
   const slug =
     slugify(input.company) + "-" + Math.random().toString(36).slice(2, 8);
 
@@ -131,65 +108,56 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
         create: [
           {
             email,
-            externalId: clerkUserId,
+            // externalId is bound on first sign-in (after accepting the
+            // invite) by lib/auth.resolvePartnerUser().
+            externalId: null,
             role: "ADMIN",
-            joinedAt: new Date(),
             isActive: true,
           },
         ],
       },
-      profile: {
-        create: {
-          // legalName, registeredAddress, contactPhone left null —
-          // partner completes these from the dashboard.
-        },
-      },
+      profile: { create: {} },
     },
     select: { id: true },
   });
 
-  // ── Issue a single-use sign-in ticket ──────────────────────────
-  // Lets the next page auto-sign-them-in without a password round-trip.
-  let signInToken = "";
+  // ── Send the Clerk invitation ───────────────────────────────────
+  // The user clicks the link in the email → Clerk's sign-up page →
+  // sets a password → email is verified by virtue of accepting →
+  // redirects to /portal. On first /portal hit, resolveSession binds
+  // their new Clerk userId to this PartnerUser by email match and
+  // we'll set emailVerifiedAt at that moment.
   try {
-    const ticket = await clerk.signInTokens.createSignInToken({
-      userId: clerkUserId,
-      expiresInSeconds: 60 * 10, // 10 minutes
+    await clerk.invitations.createInvitation({
+      emailAddress: email,
+      redirectUrl: portalUrl(),
+      publicMetadata: {
+        firstName: firstName || undefined,
+        partnerId: partner.id,
+        company: input.company,
+      },
+      ignoreExisting: false,
     });
-    signInToken = ticket.token;
-  } catch {
-    // Non-fatal — they can still log in via the normal sign-in page.
-    signInToken = "";
+  } catch (err) {
+    // Roll back the Partner row so a retry isn't blocked by the
+    // unique email constraint on PartnerUser.
+    try {
+      await db.partner.delete({ where: { id: partner.id } });
+    } catch {}
+    const message = err instanceof Error ? err.message : "Unknown Clerk error";
+    console.error("[signup] createInvitation failed:", message);
+    return { ok: false, reason: "CLERK_ERROR", message };
   }
 
-  // ── Welcome email (best-effort) ────────────────────────────────
-  void (async () => {
-    try {
-      const tmpl = signupReceivedTemplate({
-        name: firstName || "there",
-        company: input.company,
-        portalUrl: PORTAL_URL,
-      });
-      await sendMail({ to: email, subject: tmpl.subject, text: tmpl.text });
-    } catch (err) {
-      if (process.env.NODE_ENV !== "production") {
-        console.warn("[partner-signup] welcome email failed:", err);
-      }
-    }
-  })();
-
-  return {
-    ok: true,
-    partnerId: partner.id,
-    clerkUserId,
-    signInToken,
-  };
+  return { ok: true, partnerId: partner.id, email };
 }
 
 function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 32) || "partner";
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 32) || "partner"
+  );
 }

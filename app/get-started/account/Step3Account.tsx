@@ -3,7 +3,6 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useSignIn } from "@clerk/nextjs";
 import { ArrowLeft, ArrowRight, AlertCircle } from "lucide-react";
 import Progress from "@/components/onboarding/Progress";
 import {
@@ -14,7 +13,6 @@ import { submitSignup } from "./actions";
 
 export default function Step3Account() {
   const router = useRouter();
-  const { signIn, setActive, isLoaded: clerkLoaded } = useSignIn();
   const [pending, startTransition] = useTransition();
 
   const [hydrated, setHydrated] = useState(false);
@@ -85,26 +83,12 @@ export default function Step3Account() {
         return;
       }
       clearDraft();
-
-      // Try to auto-sign-in via the single-use ticket Clerk gave us so
-      // they land in the portal in one tap. If for any reason it fails
-      // (Clerk loading, ticket expired), fall back to the sign-in URL.
-      if (result.signInToken && clerkLoaded && signIn) {
-        try {
-          const attempt = await signIn.create({
-            strategy: "ticket",
-            ticket: result.signInToken,
-          });
-          if (attempt.status === "complete" && attempt.createdSessionId) {
-            await setActive({ session: attempt.createdSessionId });
-            router.push("/portal");
-            return;
-          }
-        } catch {
-          // fall through to manual sign-in below
-        }
-      }
-      router.push("/get-started/welcome");
+      // The signup action sent a Clerk invitation to result.email.
+      // Surface a "check your inbox" page; the user clicks the link to
+      // set a password and Clerk drops them into /portal.
+      router.push(
+        `/get-started/welcome?email=${encodeURIComponent(result.email)}`,
+      );
     });
   }
 
