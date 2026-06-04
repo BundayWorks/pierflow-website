@@ -73,14 +73,9 @@ export async function getAccessRequest(id: string) {
 }
 
 export async function countPendingAccessRequests(): Promise<number> {
-  // Used by the side-nav badge. Best-effort — don't crash the nav if
-  // the DB is briefly slow.
-  try {
-    await requireSessionContext();
-    return db.accessRequest.count({ where: { status: "PENDING" } });
-  } catch {
-    return 0;
-  }
+  // Called from the staff layout after the layout has already verified
+  // staff, so we don't re-check here.
+  return db.accessRequest.count({ where: { status: "PENDING" } });
 }
 
 /* ── Approve ──────────────────────────────────────────────────── */
@@ -112,6 +107,7 @@ export async function approveAccessRequest(input: z.infer<typeof ApproveInput>) 
   const platformOrg = await getOrCreatePlatformOrg();
   const { raw: rawKey, hash, last4 } = generateApiKey("test");
 
+  const normalizedEmail = request.email.trim().toLowerCase();
   const partner = await db.$transaction(async (tx) => {
     const created = await tx.partner.create({
       data: {
@@ -130,6 +126,18 @@ export async function approveAccessRequest(input: z.infer<typeof ApproveInput>) 
               last4,
               label: "Issued on approval",
               scopes: ["records:read"],
+            },
+          ],
+        },
+        // Pre-authorise the requester as ADMIN of their partner. The
+        // externalId fills in when they sign up at /portal/sign-up with
+        // this email — handled by resolveSession() in lib/auth.ts.
+        users: {
+          create: [
+            {
+              email: normalizedEmail,
+              role: "ADMIN",
+              isActive: true,
             },
           ],
         },
@@ -162,6 +170,7 @@ export async function approveAccessRequest(input: z.infer<typeof ApproveInput>) 
       company: request.company,
       rawApiKey: rawKey,
       docsUrl: PUBLIC_DOCS_URL,
+      approvedEmail: request.email,
     });
     await sendMail({
       to: request.email,

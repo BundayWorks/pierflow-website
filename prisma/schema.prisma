@@ -155,8 +155,40 @@ model Partner {
   importPackages      ImportPackage[]
   webhookEndpoints    WebhookEndpoint[]
   accessRequests      AccessRequest[]
+  users               PartnerUser[]
 
   @@map("partners")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Partner users — humans (Clerk identities) authorised to act on
+// behalf of a Partner inside the portal. Created on access-request
+// approval and linked to the Clerk user on first sign-in.
+// ─────────────────────────────────────────────────────────────────────
+
+enum PartnerUserRole {
+  ADMIN
+  MEMBER
+}
+
+model PartnerUser {
+  id          String          @id @default(cuid())
+  partnerId   String
+  // Clerk user id — set when the invitee actually signs up. Null
+  // between "invited" and "first sign-in" so we can pre-authorise.
+  externalId  String?         @unique
+  email       String
+  role        PartnerUserRole @default(ADMIN)
+  isActive    Boolean         @default(true)
+  invitedAt   DateTime        @default(now())
+  joinedAt    DateTime?
+
+  partner     Partner         @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, email])
+  @@index([partnerId])
+  @@index([email])
+  @@map("partner_users")
 }
 
 // ─────────────────────────────────────────────────────────────────────

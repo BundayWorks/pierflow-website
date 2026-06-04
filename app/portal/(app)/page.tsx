@@ -1,13 +1,12 @@
 import Link from "next/link";
 import { currentUser } from "@clerk/nextjs/server";
 import { ArrowRight, Camera, FileCheck2, Users } from "lucide-react";
-import { getOrCreateSessionContext } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
 
 export default async function PortalDashboard() {
-  const user = await currentUser();
-  const ctx = await getOrCreateSessionContext();
+  const [user, ctx] = await Promise.all([currentUser(), requireStaff()]);
   const greet = user?.firstName ?? user?.username ?? "there";
-  const orgName = ctx?.organization.name ?? null;
+  const orgName = ctx.organization.name;
 
   return (
     <div>

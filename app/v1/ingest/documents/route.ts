@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
-import { getOrCreateSessionContext } from "@/lib/auth";
+import { resolveSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import type { DocumentType, JobPriority } from "@prisma/client";
 import { runExtractionForJob } from "@/lib/extraction/runExtraction";
@@ -75,10 +75,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const ctx = await getOrCreateSessionContext();
-  if (!ctx) {
+  const session = await resolveSession();
+  if (session.kind === "anonymous") {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
+  if (session.kind !== "staff") {
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+  }
+  const ctx = session;
 
   // Verify the batch exists in the caller's organization. This is what
   // stops a client from creating jobs against someone else's batch.

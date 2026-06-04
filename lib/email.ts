@@ -79,7 +79,12 @@ export function accessRequestApprovedTemplate(input: {
   company: string;
   rawApiKey: string;
   docsUrl: string;
+  portalSignUpUrl?: string;
+  approvedEmail: string;
 }) {
+  const signUpUrl =
+    input.portalSignUpUrl ?? "https://www.pierflow.com/portal/sign-up";
+
   const text = `Hi ${input.name},
 
 Your Pierflow Records API access for ${input.company} has been approved.
@@ -93,6 +98,11 @@ Treat this like a password — Pierflow only stores its hash, so this is your si
   curl -H "Authorization: Bearer ${input.rawApiKey}" https://www.pierflow.com/v1/organizations
 
 Quick start: ${input.docsUrl}
+
+You can also manage your keys, rotate credentials, and view usage in the partner portal:
+
+  1. Sign up at ${signUpUrl} using this email address: ${input.approvedEmail}
+  2. You'll land directly in your partner workspace — no extra setup required.
 
 If anything looks off, reply to this email and we'll sort it.
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
-import { getOrCreateSessionContext } from "@/lib/auth";
+import { resolveSession } from "@/lib/auth";
 import { buildSignedUpload } from "@/lib/cloudinary";
 import { db } from "@/lib/db";
 
@@ -45,13 +45,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const ctx = await getOrCreateSessionContext();
-  if (!ctx) {
-    return NextResponse.json(
-      { error: "UNAUTHENTICATED" },
-      { status: 401 },
-    );
+  const session = await resolveSession();
+  if (session.kind === "anonymous") {
+    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
+  if (session.kind !== "staff") {
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+  }
+  const ctx = session;
 
   // If a batch was supplied, validate it belongs to this org so the
   // folder structure can't be coerced into another tenant's prefix.
