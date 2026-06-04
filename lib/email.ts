@@ -75,6 +75,34 @@ In the meantime, you can complete your company profile and read through the docs
   };
 }
 
+/**
+ * Partner invitation email — sent from our own Gmail SMTP rather than
+ * Clerk's built-in delivery so we don't depend on Clerk's email setup
+ * being right in every environment, and so the branding stays
+ * consistent with our other transactional mails.
+ */
+export function partnerInvitationTemplate(input: {
+  name: string;
+  company: string;
+  acceptUrl: string;
+}) {
+  const text = `Hi ${input.name || "there"},
+
+Welcome to Pierflow. Your partner account for ${input.company} has been created. To finish setting up your account, click the link below to confirm your email and set a password:
+
+  ${input.acceptUrl}
+
+This link expires in 30 days. Once you're in, you'll land on your partner dashboard and can complete your onboarding checklist while our team reviews your account.
+
+If you didn't request this, you can safely ignore this email.
+
+— Pierflow`;
+  return {
+    subject: "Set up your Pierflow partner account",
+    text,
+  };
+}
+
 export function sandboxApprovedTemplate(input: {
   company: string;
   rawApiKey: string;

@@ -15,6 +15,7 @@
  */
 import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
+import { sendMail, partnerInvitationTemplate } from "@/lib/email";
 import type { PartnerType } from "@prisma/client";
 
 function portalUrl(): string {
@@ -121,14 +122,20 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
     select: { id: true },
   });
 
-  // ── Send the Clerk invitation ───────────────────────────────────
-  // The user clicks the link in the email → Clerk's sign-up page →
-  // sets a password → email is verified by virtue of accepting →
-  // redirects to /portal. On first /portal hit, resolveSession binds
-  // their new Clerk userId to this PartnerUser by email match and
-  // we'll set emailVerifiedAt at that moment.
+  // ── Create the Clerk invitation ─────────────────────────────────
+  // Clerk hands us a ticket URL. The user clicks it → Clerk's hosted
+  // sign-up page → they set a password → Clerk marks the email
+  // verified by virtue of accepting → redirects to /portal. On first
+  // /portal hit, resolveSession binds the new Clerk userId to this
+  // PartnerUser by email match and sets emailVerifiedAt.
+  //
+  // We pass notify: false so Clerk doesn't try to send the email —
+  // we deliver it ourselves via Gmail SMTP so the branding matches
+  // the rest of our transactional mail and so delivery doesn't depend
+  // on Clerk's email setup being right in dev.
+  let invitationUrl: string;
   try {
-    await clerk.invitations.createInvitation({
+    const invitation = await clerk.invitations.createInvitation({
       emailAddress: email,
       redirectUrl: portalUrl(),
       publicMetadata: {
@@ -137,7 +144,9 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
         company: input.company,
       },
       ignoreExisting: false,
+      notify: false,
     });
+    invitationUrl = invitation.url ?? "";
   } catch (err) {
     // Roll back the Partner row so a retry isn't blocked by the
     // unique email constraint on PartnerUser.
@@ -147,6 +156,29 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
     const message = err instanceof Error ? err.message : "Unknown Clerk error";
     console.error("[signup] createInvitation failed:", message);
     return { ok: false, reason: "CLERK_ERROR", message };
+  }
+
+  if (!invitationUrl) {
+    console.error(
+      "[signup] Clerk returned invitation with empty url — partner cannot accept",
+    );
+  }
+
+  // ── Send the invitation email ourselves ────────────────────────
+  try {
+    const tmpl = partnerInvitationTemplate({
+      name: firstName || "",
+      company: input.company,
+      acceptUrl: invitationUrl,
+    });
+    await sendMail({ to: email, subject: tmpl.subject, text: tmpl.text });
+  } catch (err) {
+    // Best-effort. The Partner row is already created and the Clerk
+    // invitation exists; staff can resend manually if needed.
+    console.error(
+      "[signup] invitation email send failed:",
+      err instanceof Error ? err.message : String(err),
+    );
   }
 
   return { ok: true, partnerId: partner.id, email };
