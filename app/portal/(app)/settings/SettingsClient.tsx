@@ -10,6 +10,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import {
+  buildPackagesNow,
   createPartner,
   issuePartnerApiKey,
   revokePartnerApiKey,
@@ -278,6 +279,42 @@ export default function SettingsClient({
             ))}
           </ul>
         )}
+      </div>
+
+      {/* Manual package build */}
+      <div className="rounded-2xl border border-black/[0.08] p-5 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-display text-[16px] text-accent-ink font-medium">
+            Build import packages now
+          </h3>
+          <p className="text-[12px] text-accent-ink/65 mt-0.5">
+            Runs the same job as the nightly cron, but only for this
+            organization. Bundles every validated record not yet packaged
+            and uploads the ZIP to Cloudinary.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() =>
+            startTransition(async () => {
+              setError(null);
+              try {
+                const r = await buildPackagesNow();
+                window.alert(
+                  `Built ${r.packagesBuilt} package(s) across ${r.partnersConsidered} partner link(s).`,
+                );
+              } catch (err) {
+                setError(
+                  err instanceof Error ? err.message : "Build failed.",
+                );
+              }
+            })
+          }
+          disabled={pending}
+          className="shrink-0 inline-flex items-center gap-2 text-[13px] font-medium px-4 py-2 rounded-full bg-accent-ink text-white disabled:opacity-50"
+        >
+          Build now
+        </button>
       </div>
 
       {/* Footer hint */}

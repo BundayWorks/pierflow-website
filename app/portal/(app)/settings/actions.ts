@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireSessionContext } from "@/lib/auth";
 import { generateApiKey } from "@/lib/partnerAuth";
+import { buildPendingImportPackages } from "@/lib/packages/builder";
 
 /* ── List partners + keys for this org ────────────────────────── */
 
@@ -149,6 +150,17 @@ export async function revokePartnerApiKey(apiKeyId: string) {
 
   revalidatePath("/portal/settings");
   return { ok: true };
+}
+
+/* ── Build packages now (manual trigger from settings) ─────────── */
+
+export async function buildPackagesNow() {
+  const ctx = await requireSessionContext();
+  const result = await buildPendingImportPackages({
+    organizationId: ctx.organization.id,
+  });
+  revalidatePath("/portal/settings");
+  return result;
 }
 
 /* ── Helpers ──────────────────────────────────────────────────── */
