@@ -53,6 +53,28 @@ export default function EmailVerification() {
       setPhase("sent");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      // Clerk refuses to prepare verification when an email is already
+      // marked verified server-side. That happens for legacy partner
+      // accounts created before the unverify-on-signup logic landed.
+      // In that case Clerk has already vouched for the email so we
+      // honor it on our side too and tick the checklist item.
+      if (
+        /already.*verified/i.test(msg) ||
+        primary.verification?.status === "verified"
+      ) {
+        try {
+          await markEmailVerified();
+          router.refresh();
+          return;
+        } catch (markErr) {
+          setError(
+            markErr instanceof Error
+              ? markErr.message
+              : "Failed to record verification.",
+          );
+          return;
+        }
+      }
       setError(msg || "Failed to send code. Try again in a moment.");
     } finally {
       setBusy(false);

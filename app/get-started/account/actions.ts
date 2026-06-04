@@ -88,10 +88,12 @@ export async function submitSignup(
       if (result.reason === "EMAIL_ALREADY_REGISTERED") {
         return { ok: false, error: "EMAIL_TAKEN" };
       }
+      console.error("[signup] Clerk error:", result.message);
       return { ok: false, error: "SERVER_ERROR", message: result.message };
     }
     return { ok: true, signInToken: result.signInToken };
   } catch (err) {
+    console.error("[signup] unexpected:", err);
     const message = err instanceof Error ? err.message : "Unknown error";
     return { ok: false, error: "SERVER_ERROR", message };
   }

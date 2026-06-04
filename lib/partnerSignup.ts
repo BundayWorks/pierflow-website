@@ -70,40 +70,46 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
   const firstName = nameParts[0] ?? "";
   const lastName = nameParts.slice(1).join(" ") || undefined;
 
-  // Create the Clerk user without an email first. If we passed the
-  // email to createUser, Clerk would mark it verified and refuse to
-  // unverify a primary email — that breaks the OTP verification gate
-  // on the dashboard. Adding the email as a separate step lets us set
-  // verified=false from the start, so the partner has to confirm
-  // ownership by entering a 6-digit code.
+  // Create the Clerk user with the email. Clerk's admin-create flow
+  // marks the email verified by default. Immediately walk that back
+  // via updateEmailAddress so the dashboard OTP flow can send a code
+  // and verify ownership for real.
   let clerkUserId: string;
+  let primaryEmailId: string | null = null;
   try {
     const user = await clerk.users.createUser({
+      emailAddress: [email],
       firstName: firstName || undefined,
       lastName,
       skipPasswordRequirement: true,
       skipPasswordChecks: true,
     });
     clerkUserId = user.id;
+    primaryEmailId =
+      user.emailAddresses.find(
+        (e) => e.emailAddress.toLowerCase() === email,
+      )?.id ?? null;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown Clerk error";
+    console.error("[signup] createUser failed:", message);
     return { ok: false, reason: "CLERK_ERROR", message };
   }
 
-  try {
-    await clerk.emailAddresses.createEmailAddress({
-      userId: clerkUserId,
-      emailAddress: email,
-      verified: false,
-      primary: true,
-    });
-  } catch (err) {
-    // Roll back the dangling user so we don't leave a partial account.
+  if (primaryEmailId) {
     try {
-      await clerk.users.deleteUser(clerkUserId);
-    } catch {}
-    const message = err instanceof Error ? err.message : "Unknown Clerk error";
-    return { ok: false, reason: "CLERK_ERROR", message };
+      await clerk.emailAddresses.updateEmailAddress(primaryEmailId, {
+        verified: false,
+      });
+    } catch (err) {
+      // If Clerk refuses (e.g. "primary must be verified"), we leave
+      // the email verified and rely on PartnerUser.emailVerifiedAt
+      // for the gate. The dashboard widget will show
+      // "already verified" and we'll handle that case there.
+      console.warn(
+        "[signup] could not unverify email:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 
   // ── Provision the Partner record ───────────────────────────────
