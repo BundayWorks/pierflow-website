@@ -34,8 +34,24 @@ const CreateInput = z.object({
 
 export async function createApiKey(input: z.infer<typeof CreateInput>) {
   const { partner } = await requirePartnerUser();
+
+  // Gate: only partners approved for sandbox (or production) can
+  // self-issue keys. A PENDING_SANDBOX / SUSPENDED partner that
+  // somehow reaches this server action by direct request is rejected.
+  if (
+    partner.accessStatus !== "SANDBOX" &&
+    partner.accessStatus !== "PRODUCTION_REQUESTED" &&
+    partner.accessStatus !== "PRODUCTION"
+  ) {
+    throw new Error("SANDBOX_NOT_APPROVED");
+  }
+
   const parsed = CreateInput.parse(input);
-  const { raw, hash, last4 } = generateApiKey("test");
+  // Live keys are only available once we've explicitly approved
+  // production access. Until then, even a partner with PRODUCTION
+  // status issuing new keys here gets a test key.
+  const env = partner.accessStatus === "PRODUCTION" ? "live" : "test";
+  const { raw, hash, last4 } = generateApiKey(env);
 
   await db.partnerApiKey.create({
     data: {

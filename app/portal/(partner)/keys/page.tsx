@@ -1,10 +1,20 @@
+import { requirePartnerUser } from "@/lib/auth";
 import { listMyApiKeys } from "./actions";
 import KeysClient from "./KeysClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function PartnerKeysPage() {
-  const keys = await listMyApiKeys();
+  const [{ partner }, keys] = await Promise.all([
+    requirePartnerUser(),
+    listMyApiKeys(),
+  ]);
+
+  const canCreate =
+    partner.accessStatus === "SANDBOX" ||
+    partner.accessStatus === "PRODUCTION_REQUESTED" ||
+    partner.accessStatus === "PRODUCTION";
+
   return (
     <div>
       <p className="text-[12px] uppercase tracking-[0.16em] text-accent-emerald">
@@ -20,7 +30,11 @@ export default async function PartnerKeysPage() {
         creation. Revoke any key you suspect has leaked.
       </p>
       <div className="mt-8">
-        <KeysClient initialKeys={keys} />
+        <KeysClient
+          initialKeys={keys}
+          canCreate={canCreate}
+          accessStatus={partner.accessStatus}
+        />
       </div>
     </div>
   );

@@ -1,8 +1,16 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Plus, KeyRound, AlertCircle } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Plus,
+  KeyRound,
+  AlertCircle,
+  Clock,
+} from "lucide-react";
 import { createApiKey, revokeApiKey } from "./actions";
 
 type KeyRow = {
@@ -16,7 +24,22 @@ type KeyRow = {
   expiresAt: Date | null;
 };
 
-export default function KeysClient({ initialKeys }: { initialKeys: KeyRow[] }) {
+type AccessStatus =
+  | "PENDING_SANDBOX"
+  | "SANDBOX"
+  | "PRODUCTION_REQUESTED"
+  | "PRODUCTION"
+  | "SUSPENDED";
+
+export default function KeysClient({
+  initialKeys,
+  canCreate,
+  accessStatus,
+}: {
+  initialKeys: KeyRow[];
+  canCreate: boolean;
+  accessStatus: AccessStatus;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [label, setLabel] = useState("");
@@ -65,30 +88,34 @@ export default function KeysClient({ initialKeys }: { initialKeys: KeyRow[] }) {
 
   return (
     <div className="space-y-8">
-      {/* Create */}
-      <div className="rounded-2xl border border-black/[0.08] p-5">
-        <p className="text-[11px] uppercase tracking-[0.14em] text-accent-ink/55 font-medium">
-          Issue a new key
-        </p>
-        <div className="mt-3 flex gap-2 flex-wrap">
-          <input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="Label (e.g. prod, staging, ci)"
-            maxLength={60}
-            disabled={pending}
-            className="flex-1 min-w-[200px] text-[13px] rounded-md border border-black/[0.1] bg-white px-3 py-2.5 focus:outline-none focus:border-accent-emerald/60 disabled:opacity-50"
-          />
-          <button
-            onClick={handleCreate}
-            disabled={pending}
-            className="px-4 py-2.5 rounded-md bg-accent-emerald text-white text-[13px] font-medium hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
-          >
-            <Plus size={14} />
-            {pending ? "Creating…" : "Create key"}
-          </button>
+      {/* Create or locked notice */}
+      {canCreate ? (
+        <div className="rounded-2xl border border-black/[0.08] p-5">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-accent-ink/55 font-medium">
+            Issue a new key
+          </p>
+          <div className="mt-3 flex gap-2 flex-wrap">
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Label (e.g. prod, staging, ci)"
+              maxLength={60}
+              disabled={pending}
+              className="flex-1 min-w-[200px] text-[13px] rounded-md border border-black/[0.1] bg-white px-3 py-2.5 focus:outline-none focus:border-accent-emerald/60 disabled:opacity-50"
+            />
+            <button
+              onClick={handleCreate}
+              disabled={pending}
+              className="px-4 py-2.5 rounded-md bg-accent-emerald text-white text-[13px] font-medium hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
+            >
+              <Plus size={14} />
+              {pending ? "Creating…" : "Create key"}
+            </button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <LockedNotice accessStatus={accessStatus} />
+      )}
 
       {error ? (
         <div className="rounded-md border border-[#a83232]/30 bg-[#fde6e6] px-3 py-2.5 text-[12px] text-[#7a2222] flex items-start gap-2">
@@ -201,6 +228,59 @@ export default function KeysClient({ initialKeys }: { initialKeys: KeyRow[] }) {
             })}
           </ul>
         )}
+      </div>
+    </div>
+  );
+}
+
+function LockedNotice({ accessStatus }: { accessStatus: AccessStatus }) {
+  if (accessStatus === "SUSPENDED") {
+    return (
+      <div className="rounded-2xl border border-[#a83232]/30 bg-[#fde6e6] p-5 flex items-start gap-3">
+        <AlertCircle size={18} className="mt-0.5 text-[#a83232]" />
+        <div className="flex-1 min-w-0">
+          <p className="text-[14px] font-medium text-[#7a2222]">
+            Account suspended
+          </p>
+          <p className="mt-1 text-[12px] text-[#7a2222]/85 leading-[1.6]">
+            Your account is currently paused, so no new keys can be issued.
+            See your{" "}
+            <Link href="/portal/overview" className="underline">
+              overview
+            </Link>{" "}
+            for details, or reach out to{" "}
+            <a
+              href="mailto:pierflowllc@gmail.com"
+              className="underline"
+            >
+              pierflowllc@gmail.com
+            </a>
+            .
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-2xl border border-[#fff4d4] bg-[#fffaee] p-5 flex items-start gap-3">
+      <Clock size={18} className="mt-0.5 text-[#7a4a00]" />
+      <div className="flex-1 min-w-0">
+        <p className="text-[14px] font-medium text-accent-ink">
+          API keys unlock once your sandbox is approved
+        </p>
+        <p className="mt-1 text-[12px] text-accent-ink/65 leading-[1.6]">
+          Our team is reviewing your account — usually within one business
+          day. Once we approve you for sandbox access, your first key will
+          appear here automatically and you&apos;ll be able to issue more
+          from this page. In the meantime, you can finish the rest of your{" "}
+          <Link
+            href="/portal/overview"
+            className="text-accent-emerald hover:underline"
+          >
+            onboarding checklist
+          </Link>
+          .
+        </p>
       </div>
     </div>
   );
