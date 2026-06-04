@@ -1,8 +1,32 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { SignUp } from "@clerk/nextjs";
 import Logo from "@/components/shared/Logo";
 
-export default function Page() {
+/**
+ * Sign-up is gated behind the /get-started funnel so we always capture
+ * the company / use-case context up-front. The only legitimate way to
+ * land on this page is by clicking an invitation link, which carries
+ * `__clerk_ticket` (or, in some browsers, the `ticket` param). Anything
+ * else bounces to /get-started.
+ *
+ * The catch-all `[[...sign-up]]` segment also gets factor-verify
+ * sub-routes from Clerk; we let the SignUp component handle those too,
+ * but the entry point is gated.
+ */
+export default function Page({
+  searchParams,
+}: {
+  searchParams?: { [key: string]: string | string[] | undefined };
+}) {
+  const params = searchParams ?? {};
+  const hasInvitationTicket = Boolean(
+    params["__clerk_ticket"] || params["ticket"],
+  );
+  if (!hasInvitationTicket) {
+    redirect("/get-started");
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="px-6 py-5 border-b border-black/[0.06] flex items-center justify-between">

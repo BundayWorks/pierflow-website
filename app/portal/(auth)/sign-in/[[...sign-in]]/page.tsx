@@ -15,10 +15,10 @@ export default function Page() {
         <p className="text-[13px] text-accent-ink/55">
           New here?{" "}
           <Link
-            href="/portal/sign-up"
+            href="/get-started"
             className="text-accent-emerald hover:underline"
           >
-            Create an account
+            Get started
           </Link>
         </p>
       </header>
