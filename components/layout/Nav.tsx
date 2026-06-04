@@ -68,6 +68,12 @@ export default function Nav() {
 
           <div className="hidden lg:flex items-center gap-2">
             <Link
+              href="/portal"
+              className="text-[14px] px-3 py-2 text-accent-ink/75 hover:text-accent-ink"
+            >
+              Log in
+            </Link>
+            <Link
               href="/company/contact"
               className="text-[14px] px-4 py-2 rounded-full border border-accent-ink/15 text-accent-ink hover:bg-black/[0.04]"
             >
@@ -150,8 +156,15 @@ export default function Nav() {
                 />
               ))}
               <Link
+                href="/portal"
+                className="mt-4 text-center text-[14px] px-4 py-2.5 rounded-full border border-accent-ink/15 text-accent-ink"
+                onClick={() => setMobileOpen(false)}
+              >
+                Log in
+              </Link>
+              <Link
                 href="/developers/request-access"
-                className="mt-4 text-center text-[14px] px-4 py-2.5 rounded-full bg-accent-ink text-white"
+                className="mt-2 text-center text-[14px] px-4 py-2.5 rounded-full bg-accent-ink text-white"
                 onClick={() => setMobileOpen(false)}
               >
                 Get API access
