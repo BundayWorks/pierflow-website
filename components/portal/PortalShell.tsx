@@ -10,26 +10,41 @@ import {
   Users,
   Building2,
   Settings,
+  Inbox,
   type LucideIcon,
 } from "lucide-react";
 import Logo from "@/components/shared/Logo";
 
-type NavItem = { label: string; href: string; icon: LucideIcon };
+type NavItem = {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  badgeKey?: "pendingAccessRequests";
+};
 
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/portal", icon: LayoutDashboard },
   { label: "Capture", href: "/portal/capture", icon: Camera },
   { label: "Review queue", href: "/portal/review", icon: FileCheck2 },
   { label: "Patients", href: "/portal/patients", icon: Users },
+  {
+    label: "Access requests",
+    href: "/portal/access-requests",
+    icon: Inbox,
+    badgeKey: "pendingAccessRequests",
+  },
   { label: "Organization", href: "/portal/organization", icon: Building2 },
   { label: "Settings", href: "/portal/settings", icon: Settings },
 ];
 
 export default function PortalShell({
   children,
+  pendingAccessRequests = 0,
 }: {
   children: React.ReactNode;
+  pendingAccessRequests?: number;
 }) {
+  const badges = { pendingAccessRequests };
   const pathname = usePathname() ?? "/portal";
 
   const isActive = (href: string) =>
@@ -63,6 +78,7 @@ export default function PortalShell({
             {NAV.map((item) => {
               const active = isActive(item.href);
               const Icon = item.icon;
+              const count = item.badgeKey ? badges[item.badgeKey] : 0;
               return (
                 <Link
                   key={item.href}
@@ -74,7 +90,18 @@ export default function PortalShell({
                   }`}
                 >
                   <Icon size={16} />
-                  {item.label}
+                  <span className="flex-1">{item.label}</span>
+                  {count > 0 ? (
+                    <span
+                      className={`text-[10px] font-medium leading-none px-1.5 py-1 rounded-full min-w-[18px] text-center ${
+                        active
+                          ? "bg-accent-emerald text-white"
+                          : "bg-[#fff4d4] text-[#7a4a00]"
+                      }`}
+                    >
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  ) : null}
                 </Link>
               );
             })}

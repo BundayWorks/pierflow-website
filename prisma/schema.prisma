@@ -154,8 +154,53 @@ model Partner {
   organizationLinks   PartnerOrganizationLink[]
   importPackages      ImportPackage[]
   webhookEndpoints    WebhookEndpoint[]
+  accessRequests      AccessRequest[]
 
   @@map("partners")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Access requests — submitted via the public /developers/request-access
+// form, reviewed inside the portal at /portal/access-requests.
+// ─────────────────────────────────────────────────────────────────────
+
+enum AccessRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+model AccessRequest {
+  id                 String              @id @default(cuid())
+  name               String
+  email              String
+  company            String
+  websiteUrl         String?
+  useCase            String              @db.Text
+  expectedVolume     String?
+  partnerType        PartnerType         @default(OTHER)
+  status             AccessRequestStatus @default(PENDING)
+
+  // Set when approved — points at the provisioned Partner.
+  approvedPartnerId  String?
+  approvedPartner    Partner?            @relation(fields: [approvedPartnerId], references: [id])
+  approvedApiKeyLast4 String?            // for the reviewer to recognise which key was issued
+
+  reviewerExternalId String?             // Clerk user id of approver / rejecter
+  reviewedAt         DateTime?
+  reviewerNotes      String?             @db.Text
+
+  // Anti-spam diagnostics
+  ipAddress          String?
+  userAgent          String?
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email])
+  @@map("access_requests")
 }
 
 model PartnerApiKey {
