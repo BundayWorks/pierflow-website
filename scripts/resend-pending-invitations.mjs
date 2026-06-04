@@ -21,6 +21,12 @@ const transporter = nodemailer.createTransport({
 
 const fromName = process.env.EMAIL_FROM_NAME ?? "Pierflow";
 
+const siteBase =
+  (process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.pierflow.com").replace(
+    /\/$/,
+    "",
+  );
+
 const invitations = await clerk.invitations.getInvitationList({
   status: "pending",
   limit: 50,
@@ -30,11 +36,16 @@ for (const inv of invitations.data) {
   const meta = inv.publicMetadata ?? {};
   const firstName = typeof meta.firstName === "string" ? meta.firstName : "";
   const company = typeof meta.company === "string" ? meta.company : "your team";
-  const acceptUrl = inv.url ?? "";
-  if (!acceptUrl) {
-    console.warn(`skipping ${inv.id} — no url`);
+  const clerkUrl = inv.url ?? "";
+  let ticket = "";
+  try {
+    ticket = new URL(clerkUrl).searchParams.get("ticket") ?? "";
+  } catch {}
+  if (!ticket) {
+    console.warn(`skipping ${inv.id} — no ticket`);
     continue;
   }
+  const acceptUrl = `${siteBase}/portal/sign-up?__clerk_ticket=${encodeURIComponent(ticket)}&redirect_url=${encodeURIComponent("/portal")}`;
   const text = `Hi ${firstName || "there"},
 
 Welcome to Pierflow. Your partner account for ${company} has been created. To finish setting up your account, click the link below to confirm your email and set a password:

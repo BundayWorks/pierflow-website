@@ -133,7 +133,14 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
   // we deliver it ourselves via Gmail SMTP so the branding matches
   // the rest of our transactional mail and so delivery doesn't depend
   // on Clerk's email setup being right in dev.
-  let invitationUrl: string;
+  // We construct our own accept URL that points directly at our
+  // sign-up route with the Clerk ticket attached. Clerk's hosted
+  // accept endpoint is supposed to redirect to the configured sign-up
+  // URL, but on dev instances it can end up on sign-in instead. By
+  // building the link ourselves we bypass that hop entirely — the
+  // <SignUp /> component reads __clerk_ticket from the URL and
+  // completes the flow.
+  let invitationTicket: string;
   try {
     const invitation = await clerk.invitations.createInvitation({
       emailAddress: email,
@@ -146,7 +153,11 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
       ignoreExisting: false,
       notify: false,
     });
-    invitationUrl = invitation.url ?? "";
+    // invitation.url is "https://<clerk-frontend>/v1/tickets/accept?ticket=…"
+    // — pull the ticket out for our own redirect.
+    invitationTicket = invitation.url
+      ? new URL(invitation.url).searchParams.get("ticket") ?? ""
+      : "";
   } catch (err) {
     // Roll back the Partner row so a retry isn't blocked by the
     // unique email constraint on PartnerUser.
@@ -158,11 +169,16 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
     return { ok: false, reason: "CLERK_ERROR", message };
   }
 
-  if (!invitationUrl) {
+  if (!invitationTicket) {
     console.error(
-      "[signup] Clerk returned invitation with empty url — partner cannot accept",
+      "[signup] Clerk returned invitation with no ticket — partner cannot accept",
     );
   }
+
+  const siteBase =
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+    "https://www.pierflow.com";
+  const invitationUrl = `${siteBase}/portal/sign-up?__clerk_ticket=${encodeURIComponent(invitationTicket)}&redirect_url=${encodeURIComponent("/portal")}`;
 
   // ── Send the invitation email ourselves ────────────────────────
   try {
