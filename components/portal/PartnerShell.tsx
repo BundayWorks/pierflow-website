@@ -8,6 +8,8 @@ import {
   Key,
   BookOpen,
   BarChart3,
+  Building2,
+  Webhook,
   type LucideIcon,
 } from "lucide-react";
 import Logo from "@/components/shared/Logo";
@@ -21,7 +23,9 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { label: "Overview", href: "/portal/overview", icon: Home },
+  { label: "Organizations", href: "/portal/organizations", icon: Building2 },
   { label: "API keys", href: "/portal/keys", icon: Key },
+  { label: "Webhooks", href: "/portal/webhooks", icon: Webhook },
   { label: "Usage", href: "/portal/usage", icon: BarChart3 },
   {
     label: "Docs",

@@ -76,6 +76,43 @@ In the meantime, you can complete your company profile and read through the docs
 }
 
 /**
+ * Internal "new partner signed up" alert. Goes to every email in
+ * ADMIN_EMAILS so the team sees the request without polling the
+ * staff inbox.
+ */
+export function staffNewPartnerSignupTemplate(input: {
+  name: string;
+  email: string;
+  company: string;
+  partnerType: string;
+  primaryUseCase?: string | null;
+  expectedVolume?: string | null;
+  timeline?: string | null;
+  websiteUrl?: string | null;
+  reviewUrl: string;
+}) {
+  const lines = [
+    `New partner sign-up: ${input.company}`,
+    "",
+    `Requester:     ${input.name} <${input.email}>`,
+    `Partner type:  ${input.partnerType}`,
+    input.primaryUseCase ? `Use case:      ${input.primaryUseCase}` : null,
+    input.expectedVolume ? `Volume:        ${input.expectedVolume}` : null,
+    input.timeline ? `Timeline:      ${input.timeline}` : null,
+    input.websiteUrl ? `Website:       ${input.websiteUrl}` : null,
+    "",
+    `Review and approve sandbox access:`,
+    `  ${input.reviewUrl}`,
+    "",
+    "— Pierflow",
+  ].filter(Boolean) as string[];
+  return {
+    subject: `[Pierflow] New partner: ${input.company}`,
+    text: lines.join("\n"),
+  };
+}
+
+/**
  * Partner invitation email — sent from our own Gmail SMTP rather than
  * Clerk's built-in delivery so we don't depend on Clerk's email setup
  * being right in every environment, and so the branding stays

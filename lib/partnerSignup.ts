@@ -15,7 +15,11 @@
  */
 import { clerkClient } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
-import { sendMail, partnerInvitationTemplate } from "@/lib/email";
+import {
+  sendMail,
+  partnerInvitationTemplate,
+  staffNewPartnerSignupTemplate,
+} from "@/lib/email";
 import type { PartnerType } from "@prisma/client";
 
 function portalUrl(): string {
@@ -196,6 +200,42 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
       err instanceof Error ? err.message : String(err),
     );
   }
+
+  // ── Notify Pierflow staff ──────────────────────────────────────
+  // Fire-and-forget alert to anyone in ADMIN_EMAILS so the team
+  // doesn't have to poll the partners inbox. Failures are logged but
+  // don't break the signup response.
+  void (async () => {
+    const adminRecipients = (process.env.ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (adminRecipients.length === 0) return;
+    try {
+      const tmpl = staffNewPartnerSignupTemplate({
+        name: input.fullName,
+        email,
+        company: input.company,
+        partnerType: input.partnerType,
+        primaryUseCase: input.primaryUseCase,
+        expectedVolume: input.expectedVolume,
+        timeline: input.timeline,
+        websiteUrl: input.websiteUrl,
+        reviewUrl: `${siteBase}/portal/partners/${partner.id}`,
+      });
+      await sendMail({
+        to: adminRecipients.join(", "),
+        subject: tmpl.subject,
+        text: tmpl.text,
+        replyTo: email,
+      });
+    } catch (err) {
+      console.error(
+        "[signup] staff alert email failed:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  })();
 
   return { ok: true, partnerId: partner.id, email };
 }

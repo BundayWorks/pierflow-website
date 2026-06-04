@@ -1,22 +1,31 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@clerk/nextjs/server";
-import { resolveSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import type { DocumentType, JobPriority } from "@prisma/client";
 import { runExtractionForJob } from "@/lib/extraction/runExtraction";
+import {
+  resolveIngestActor,
+  assertOrgAllowed,
+  unauthorized,
+  forbidden,
+  notFound,
+  validationError,
+} from "@/lib/ingestAuth";
 
 /**
  * POST /v1/ingest/documents
  *
- * Called by the capture page (and, in the future, by direct-upload
- * server-to-server integrations) after a file has been uploaded to
- * Cloudinary. Creates a ProcessingJob row tied to a ScanBatch and the
- * caller's Organization.
+ * Called after a file has been uploaded to Cloudinary (via /v1/uploads/sign).
+ * Creates a ProcessingJob row tied to a ScanBatch + Organization. The
+ * request returns 202 with a job_id immediately; extraction (Haiku)
+ * runs out of band.
  *
- * This is the asynchronous handoff point — the request returns 202 with
- * a job_id immediately; extraction (Haiku) runs out of band in the next
- * step of the pipeline.
+ * Accepts:
+ *   - Staff Clerk session (the /portal/capture flow)
+ *   - Partner bearer token (programmatic ingest)
+ *
+ * Partners MUST pass organizationId in the body. The organization must
+ * be ACTIVE and the partner must have a PartnerOrganizationLink to it.
  */
 
 const SourceAsset = z.object({
@@ -30,6 +39,7 @@ const SourceAsset = z.object({
 });
 
 const Body = z.object({
+  organizationId: z.string().min(1).optional(),
   batchId: z.string().min(1),
   source: SourceAsset,
   filename: z.string().max(255).optional(),
@@ -57,41 +67,41 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
-  }
-
   let body: z.infer<typeof Body>;
   try {
     body = Body.parse(await req.json());
   } catch (err) {
-    return NextResponse.json(
-      {
-        error: "VALIDATION_ERROR",
-        details: err instanceof z.ZodError ? err.issues : undefined,
-      },
-      { status: 422 },
-    );
+    return validationError(err instanceof z.ZodError ? err.issues : undefined);
   }
 
-  const session = await resolveSession();
-  if (session.kind === "anonymous") {
-    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
-  }
-  if (session.kind !== "staff") {
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
-  }
-  const ctx = session;
+  const actor = await resolveIngestActor(req);
+  if (!actor) return unauthorized();
 
-  // Verify the batch exists in the caller's organization. This is what
-  // stops a client from creating jobs against someone else's batch.
+  let organizationId: string;
+  if (actor.kind === "staff") {
+    organizationId = body.organizationId ?? actor.organizationId;
+    if (organizationId !== actor.organizationId) {
+      return forbidden("ORG_SCOPE_MISMATCH");
+    }
+  } else {
+    if (!body.organizationId) {
+      return validationError({ organizationId: "REQUIRED" });
+    }
+    organizationId = body.organizationId;
+  }
+
+  if (!(await assertOrgAllowed(actor, organizationId))) {
+    return forbidden("ORG_NOT_LINKED");
+  }
+
+  // Verify the batch exists in that org. Stops a client from creating
+  // jobs against a batch in another tenant.
   const batch = await db.scanBatch.findUnique({
     where: { id: body.batchId },
     select: { organizationId: true, priority: true },
   });
-  if (!batch || batch.organizationId !== ctx.organization.id) {
-    return NextResponse.json({ error: "BATCH_NOT_FOUND" }, { status: 404 });
+  if (!batch || batch.organizationId !== organizationId) {
+    return notFound("BATCH_NOT_FOUND");
   }
 
   // Idempotency: same key in the same org returns the original row.
@@ -99,7 +109,7 @@ export async function POST(req: Request) {
     const existing = await db.processingJob.findUnique({
       where: {
         organizationId_idempotencyKey: {
-          organizationId: ctx.organization.id,
+          organizationId,
           idempotencyKey: body.idempotencyKey,
         },
       },
@@ -123,7 +133,7 @@ export async function POST(req: Request) {
   const job = await db.processingJob.create({
     data: {
       batchId: body.batchId,
-      organizationId: ctx.organization.id,
+      organizationId,
       sourceAsset: body.source as object,
       sourceFilename: body.filename ?? null,
       pageCount: body.pageCount ?? 1,
@@ -136,8 +146,7 @@ export async function POST(req: Request) {
   });
 
   // Fire-and-forget extraction. Vercel Fluid Compute keeps the function
-  // instance alive past the response, so this completes asynchronously
-  // without blocking the client.
+  // instance alive past the response.
   void runExtractionForJob(job.id).catch((err) => {
     if (process.env.NODE_ENV !== "production") {
       console.error("[ingest] extraction kickoff failed:", err);

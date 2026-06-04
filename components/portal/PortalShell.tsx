@@ -19,7 +19,7 @@ type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  badgeKey?: "partnersAwaitingReview";
+  badgeKey?: "partnersAwaitingReview" | "orgsAwaitingReview";
 };
 
 const NAV: NavItem[] = [
@@ -33,18 +33,25 @@ const NAV: NavItem[] = [
     icon: Inbox,
     badgeKey: "partnersAwaitingReview",
   },
-  { label: "Organization", href: "/portal/organization", icon: Building2 },
+  {
+    label: "Customer orgs",
+    href: "/portal/customer-orgs",
+    icon: Building2,
+    badgeKey: "orgsAwaitingReview",
+  },
   { label: "Settings", href: "/portal/settings", icon: Settings },
 ];
 
 export default function PortalShell({
   children,
   partnersAwaitingReview = 0,
+  orgsAwaitingReview = 0,
 }: {
   children: React.ReactNode;
   partnersAwaitingReview?: number;
+  orgsAwaitingReview?: number;
 }) {
-  const badges = { partnersAwaitingReview };
+  const badges = { partnersAwaitingReview, orgsAwaitingReview };
   const pathname = usePathname() ?? "/portal";
 
   const isActive = (href: string) =>

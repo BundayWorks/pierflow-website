@@ -20,6 +20,7 @@ import { v2 as cloudinary } from "cloudinary";
 import JSZip from "jszip";
 import { db } from "@/lib/db";
 import type { FhirBundle } from "@/lib/fhir/mapper";
+import { emitFireAndForget } from "@/lib/webhooks";
 
 const PACKAGE_TTL_DAYS = 7;
 
@@ -274,6 +275,16 @@ async function buildPackageForPair(input: {
       `[packages] built ${pkg.id} (${manifest.patient_count} patients, ${manifest.record_count} records, ${upload.bytes} bytes)`,
     );
   }
+
+  emitFireAndForget(input.partnerId, "import_package.ready", {
+    package_id: pkg.id,
+    organization_id: input.organizationId,
+    patient_count: manifest.patient_count,
+    record_count: manifest.record_count,
+    file_size_bytes: Number(upload.bytes),
+    download_endpoint: `/v1/import-packages/${pkg.id}/download`,
+    expires_at: expiresAt.toISOString(),
+  });
   return true;
 }
 

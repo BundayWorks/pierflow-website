@@ -14,6 +14,7 @@ import { extractPage } from "./extract";
 import { buildFhirBundle, type ExtractedJson } from "@/lib/fhir/mapper";
 import { validateExtraction } from "@/lib/validate/rules";
 import type { RecordValidationStatus } from "@prisma/client";
+import { emitFireAndForget } from "@/lib/webhooks";
 
 export async function runExtractionForJob(jobId: string): Promise<void> {
   // Atomic claim — only one worker can advance a QUEUED job at a time.
@@ -112,6 +113,20 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
         },
       }),
     ]);
+
+    // Notify partners linked to this org. processing_job.completed
+    // fires for both auto-approved and review-required outcomes.
+    await emitProcessingJobEvent(
+      job.id,
+      job.organizationId,
+      "processing_job.completed",
+      {
+        completeness_score: validation.completenessScore,
+        avg_confidence: result.avgConfidence,
+        validation_status: validationStatus,
+        job_status: jobStatus,
+      },
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await markFailed(jobId, "EXTRACTION_FAILED", message);
@@ -119,7 +134,7 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
 }
 
 async function markFailed(jobId: string, code: string, detail: string) {
-  await db.processingJob.update({
+  const job = await db.processingJob.update({
     where: { id: jobId },
     data: {
       status: "FAILED",
@@ -127,5 +142,36 @@ async function markFailed(jobId: string, code: string, detail: string) {
       errorDetail: detail,
       completedAt: new Date(),
     },
+    select: { id: true, organizationId: true },
   });
+  await emitProcessingJobEvent(
+    job.id,
+    job.organizationId,
+    "processing_job.failed",
+    { error_code: code, error_detail: detail },
+  );
+}
+
+/**
+ * Emit a processing_job.* event to every partner linked to the org.
+ * Fire-and-forget per partner so a slow webhook doesn't block the
+ * extraction pipeline.
+ */
+async function emitProcessingJobEvent(
+  jobId: string,
+  organizationId: string,
+  event: "processing_job.completed" | "processing_job.failed",
+  extra: Record<string, unknown>,
+): Promise<void> {
+  const links = await db.partnerOrganizationLink.findMany({
+    where: { organizationId },
+    select: { partnerId: true },
+  });
+  for (const { partnerId } of links) {
+    emitFireAndForget(partnerId, event, {
+      job_id: jobId,
+      organization_id: organizationId,
+      ...extra,
+    });
+  }
 }

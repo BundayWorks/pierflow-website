@@ -38,6 +38,20 @@ enum OrganizationType {
   OTHER
 }
 
+// Lifecycle for orgs registered through the partner portal.
+//   PENDING   — partner submitted; awaiting Pierflow review.
+//   ACTIVE    — approved; capture + ingest enabled.
+//   REJECTED  — staff declined; partner can edit and resubmit.
+//   SUSPENDED — operational pause, distinct from soft-delete.
+// Orgs created directly by staff (e.g. the platform org) skip
+// PENDING and start ACTIVE.
+enum OrgAccessStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  SUSPENDED
+}
+
 model Organization {
   id          String           @id @default(cuid())
   name        String
@@ -49,9 +63,24 @@ model Organization {
   lga         String?
   state       String?
   country     String           @default("NG")
+  // Stable system URI prefix the partner uses for internal patient
+  // identifiers. e.g. "https://healthos.ng/mrn/" — combined with the
+  // MRN value to namespace identifiers across partners.
+  mrnSystem   String?
   // Free-form metadata for fields we haven't formalised
   metadata    Json?
   isActive    Boolean          @default(true)
+
+  // Lifecycle introduced when partners gained the ability to register
+  // their own customer orgs through the portal.
+  accessStatus           OrgAccessStatus @default(ACTIVE)
+  requestedByPartnerId   String?
+  requestedByExternalId  String?
+  approvedByExternalId   String?
+  approvedAt             DateTime?
+  rejectionReason        String?
+  reviewerNotes          String?         @db.Text
+
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
@@ -63,10 +92,40 @@ model Organization {
   processingJobs      ProcessingJob[]
   extractedRecords    ExtractedRecord[]
   importPackages      ImportPackage[]
+  approvalEvents      OrganizationApprovalEvent[]
+  requestedByPartner  Partner?         @relation("OrgsRequestedByPartner", fields: [requestedByPartnerId], references: [id])
 
   @@index([type])
   @@index([isActive])
+  @@index([accessStatus])
+  @@index([requestedByPartnerId])
   @@map("organizations")
+}
+
+// Audit trail for every state transition on an Organization. Append
+// only; we never edit rows after insertion.
+enum OrgApprovalAction {
+  REQUESTED
+  APPROVED
+  REJECTED
+  SUSPENDED
+  REINSTATED
+  EDITED
+}
+
+model OrganizationApprovalEvent {
+  id             String             @id @default(cuid())
+  organizationId String
+  action         OrgApprovalAction
+  actorExternalId String?           // Clerk user id of the actor (null for system events)
+  notes          String?            @db.Text
+  detail         Json?              // before/after diff or extra context
+  occurredAt     DateTime           @default(now())
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, occurredAt])
+  @@map("organization_approval_events")
 }
 
 model Site {
@@ -188,6 +247,7 @@ model Partner {
   profile             PartnerProfile?
   agreements          PartnerAgreement[]
   securityAssessment  PartnerSecurityAssessment?
+  requestedOrgs       Organization[] @relation("OrgsRequestedByPartner")
 
   @@index([accessStatus])
   @@map("partners")
@@ -557,7 +617,11 @@ model WebhookEndpoint {
   partnerId   String
   url         String
   events      String[] @default([])
-  // Per-endpoint HMAC secret, stored hashed
+  // Per-endpoint HMAC signing secret. Stored encrypted at rest by
+  // Supabase's column-level encryption; we never expose it back to
+  // the partner — they can rotate but not re-read. Despite the legacy
+  // column name ("secretHash"), this holds the raw signing key — HMAC
+  // would not work with a one-way hash.
   secretHash  String
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
