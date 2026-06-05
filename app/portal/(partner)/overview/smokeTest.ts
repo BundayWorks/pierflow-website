@@ -152,10 +152,15 @@ export async function runSmokeTest(): Promise<SmokeTestResult> {
     // call ensureConfigured() themselves; we use the raw uploader here
     // so we have to do it explicitly.
     ensureConfigured();
+    // The sample we host is an SVG so it stays version-controllable.
+    // Claude's vision API only accepts PNG / JPEG / WEBP / GIF, so we
+    // ask Cloudinary to rasterise on upload (`format: "png"`). The
+    // returned secure_url then points at the PNG variant.
     const result = await cloudinary.uploader.upload(SAMPLE_IMAGE_URL, {
       folder: `pierflow/${organizationId}/${batchId}`,
       resource_type: "image",
       type: "upload",
+      format: "png",
     });
     publicId = result.public_id;
     secureUrl = result.secure_url;
