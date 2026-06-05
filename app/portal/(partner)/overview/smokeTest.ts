@@ -1,6 +1,6 @@
 "use server";
 
-import { cloudinary } from "@/lib/cloudinary";
+import { cloudinary, ensureConfigured } from "@/lib/cloudinary";
 import { db } from "@/lib/db";
 import { requirePartnerUser } from "@/lib/auth";
 import { runExtractionForJob } from "@/lib/extraction/runExtraction";
@@ -147,6 +147,11 @@ export async function runSmokeTest(): Promise<SmokeTestResult> {
   let format: string | undefined;
   let version: string | undefined;
   try {
+    // The Cloudinary SDK is lazy — nothing reads CLOUDINARY_* until we
+    // call config(). The buildSignedUpload / destroyAsset / etc. helpers
+    // call ensureConfigured() themselves; we use the raw uploader here
+    // so we have to do it explicitly.
+    ensureConfigured();
     const result = await cloudinary.uploader.upload(SAMPLE_IMAGE_URL, {
       folder: `pierflow/${organizationId}/${batchId}`,
       resource_type: "image",

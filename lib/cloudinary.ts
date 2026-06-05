@@ -15,7 +15,7 @@ import { v2 as cloudinary } from "cloudinary";
 
 let configured = false;
 
-function ensureConfigured() {
+export function ensureConfigured() {
   if (configured) return;
   const cloud_name = process.env.CLOUDINARY_CLOUD_NAME;
   const api_key = process.env.CLOUDINARY_API_KEY;
