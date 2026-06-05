@@ -20,10 +20,25 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4rem 5rem;
+  /* Mobile-first padding — tight enough that 360px viewports still
+     show a full slide without horizontal scroll. Print + desktop
+     override below. */
+  padding: 4rem 1.25rem;
   background: #0a0a0a;
   color: white;
   overflow: hidden;
+}
+
+@media (min-width: 640px) {
+  .deck-slide {
+    padding: 4rem 2.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .deck-slide {
+    padding: 4rem 5rem;
+  }
 }
 
 /* Subtle dark gradient backdrop on every dark slide, mirroring the
@@ -76,6 +91,18 @@
   display: flex;
 }
 
+/* The bottom-right slide-counter / brand mark collides with the
+   floating controls on small screens. Only show it once there's room. */
+.deck-pagemark {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .deck-pagemark {
+    display: flex;
+  }
+}
+
 /* ── Print: every slide becomes a page ──────────────────────── */
 
 @media print {
@@ -97,6 +124,12 @@
   header,
   nav {
     display: none !important;
+  }
+
+  /* Always show the bottom-right mark in print, even though screen
+     hides it on phones. */
+  .deck-pagemark {
+    display: flex !important;
   }
 
   .deck-slide {

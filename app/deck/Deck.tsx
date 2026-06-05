@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -20,6 +20,7 @@ import {
   Sparkles,
   CheckCircle2,
   ArrowRight,
+  ArrowDown,
 } from "lucide-react";
 import Logo from "@/components/shared/Logo";
 
@@ -94,11 +95,35 @@ export default function Deck() {
     if (typeof window !== "undefined") window.print();
   }
 
+  // Touch swipe nav for phones — horizontal swipe over 40px advances.
+  // We track on the slides container so vertical scrolling within a
+  // slide (rare on these layouts but possible on small screens) isn't
+  // interpreted as a navigation gesture.
+  const swipeRef = useRef<{ x: number; y: number } | null>(null);
+  function onTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    swipeRef.current = { x: t.clientX, y: t.clientY };
+  }
+  function onTouchEnd(e: React.TouchEvent) {
+    const start = swipeRef.current;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    swipeRef.current = null;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    goto(dx < 0 ? index + 1 : index - 1);
+  }
+
   return (
     <div className="deck">
       {/* On-screen: only the active slide is visible. Print: all slides,
           one per page. */}
-      <div className="deck-slides">
+      <div
+        className="deck-slides"
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+      >
         <Slide id={1} active={index === 1}>
           <Cover />
         </Slide>
@@ -131,8 +156,14 @@ export default function Deck() {
         </Slide>
       </div>
 
-      {/* Controls — hidden in print. */}
-      <div className="deck-controls fixed bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/55 backdrop-blur-md border border-white/10 rounded-full px-2 py-1.5 z-50 print:hidden">
+      {/* Controls — hidden in print. The pb-[max(...)] respects the
+          iOS safe area so the bar isn't under the home-indicator. */}
+      <div
+        className="deck-controls fixed left-1/2 -translate-x-1/2 flex items-center gap-1 sm:gap-2 bg-black/55 backdrop-blur-md border border-white/10 rounded-full px-2 py-1.5 z-50 print:hidden"
+        style={{
+          bottom: "max(1rem, env(safe-area-inset-bottom))",
+        }}
+      >
         <button
           onClick={() => goto(index - 1)}
           disabled={index === 1}
@@ -197,7 +228,7 @@ function PageMark({ id, tone }: { id: number; tone: "dark" | "light" }) {
   const color = tone === "light" ? "text-accent-ink/45" : "text-white/45";
   return (
     <div
-      className={`absolute bottom-6 right-8 text-[10px] font-mono tracking-[0.18em] uppercase ${color} flex items-center gap-3`}
+      className={`deck-pagemark absolute bottom-6 right-8 text-[10px] font-mono tracking-[0.18em] uppercase ${color} items-center gap-3`}
     >
       <span>{String(id).padStart(2, "0")} / 10</span>
       <span>pierflow.com</span>
@@ -237,10 +268,10 @@ function Headline({
   const color = tone === "light" ? "text-accent-ink" : "text-white";
   const sizeClass =
     size === "xl"
-      ? "text-[56px] md:text-[80px] leading-[0.98]"
+      ? "text-[34px] sm:text-[48px] md:text-[80px] leading-[1.02] md:leading-[0.98]"
       : size === "lg"
-        ? "text-[44px] md:text-[60px] leading-[1.02]"
-        : "text-[36px] md:text-[48px] leading-[1.05]";
+        ? "text-[28px] sm:text-[40px] md:text-[60px] leading-[1.08] md:leading-[1.02]"
+        : "text-[24px] sm:text-[32px] md:text-[48px] leading-[1.1] md:leading-[1.05]";
   return (
     <h2
       className={`font-display font-medium tracking-[-0.022em] ${sizeClass} ${color} ${className}`}
@@ -259,7 +290,9 @@ function Sub({
 }) {
   const color = tone === "light" ? "text-accent-ink/65" : "text-white/65";
   return (
-    <p className={`text-[16px] md:text-[18px] leading-[1.55] ${color}`}>
+    <p
+      className={`mt-3 md:mt-4 text-[14px] sm:text-[15px] md:text-[18px] leading-[1.6] md:leading-[1.55] ${color}`}
+    >
       {children}
     </p>
   );
@@ -276,17 +309,17 @@ function CodeBlock({
 }) {
   return (
     <div className="rounded-xl border border-white/10 bg-dark-surface overflow-hidden shadow-[0_20px_60px_-20px_rgba(0,0,0,0.5)]">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06] bg-black/40">
-        <span className="text-[11px] font-mono text-textd-secondary">
+      <div className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-2.5 border-b border-white/[0.06] bg-black/40">
+        <span className="text-[10px] sm:text-[11px] font-mono text-textd-secondary truncate">
           {filename ?? "request"}
         </span>
         {language ? (
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-sm bg-accent-green-dim text-accent-green">
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-sm bg-accent-green-dim text-accent-green shrink-0 ml-2">
             {language}
           </span>
         ) : null}
       </div>
-      <pre className="p-5 text-[13px] leading-[1.7] font-mono overflow-x-auto text-white">
+      <pre className="p-3 sm:p-5 text-[11.5px] sm:text-[13px] leading-[1.6] sm:leading-[1.7] font-mono overflow-x-auto text-white">
         <code>{children}</code>
       </pre>
     </div>
@@ -297,24 +330,29 @@ function CodeBlock({
 
 function Cover() {
   return (
-    <div className="grid lg:grid-cols-[1.05fr,0.95fr] gap-12 items-center">
+    <div className="grid lg:grid-cols-[1.05fr,0.95fr] gap-8 lg:gap-12 items-center w-full">
       <div>
-        <div className="mb-10">
-          <Logo variant="light" size="lg" />
+        <div className="mb-6 md:mb-10">
+          <span className="hidden md:inline-block">
+            <Logo variant="light" size="lg" />
+          </span>
+          <span className="md:hidden">
+            <Logo variant="light" size="md" />
+          </span>
         </div>
         <Headline size="xl">
           The connectivity layer for healthcare in Africa.
         </Headline>
-        <p className="mt-6 text-[18px] md:text-[20px] leading-[1.55] text-white/70 max-w-[520px]">
+        <p className="mt-5 md:mt-6 text-[15px] sm:text-[17px] md:text-[20px] leading-[1.55] text-white/70 max-w-[520px]">
           AI-native. API-first. Standards-aligned with FHIR R4. Built in
           Lagos.
         </p>
-        <div className="mt-10 flex flex-wrap gap-2">
+        <div className="mt-7 md:mt-10 flex flex-wrap gap-2">
           {["AI-native", "API-first", "FHIR R4", "Built for Africa"].map(
             (label) => (
               <span
                 key={label}
-                className="text-[12px] px-3 py-1.5 rounded-full border border-accent-green/30 text-accent-green bg-accent-green/[0.06]"
+                className="text-[11px] sm:text-[12px] px-3 py-1.5 rounded-full border border-accent-green/30 text-accent-green bg-accent-green/[0.06]"
               >
                 {label}
               </span>
@@ -323,7 +361,7 @@ function Cover() {
         </div>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4">
         <CodeBlock language="HTTP" filename="POST /v1/ingest/documents">
 {`{
   "organizationId": "org_lagoon_hospital",
@@ -335,7 +373,10 @@ function Cover() {
   "documentType": "OUTPATIENT_CARD"
 }`}
         </CodeBlock>
-        <CodeBlock language="HTTP 202" filename="response">
+        {/* Second response block hidden on mobile so the cover doesn't
+            need vertical scroll on a phone. */}
+        <div className="hidden sm:block">
+          <CodeBlock language="HTTP 202" filename="response">
 {`{
   "status": "accepted",
   "job_id": "job_3xMA…",
@@ -343,7 +384,8 @@ function Cover() {
   "pages": 1,
   "job_status": "QUEUED"
 }`}
-        </CodeBlock>
+          </CodeBlock>
+        </div>
       </div>
     </div>
   );
@@ -381,19 +423,19 @@ function Problem() {
         systems. Today, in most of Africa, that movement fails.
       </Sub>
 
-      <div className="mt-12 grid md:grid-cols-3 gap-5">
+      <div className="mt-8 md:mt-12 grid md:grid-cols-3 gap-3 sm:gap-5">
         {stats.map((s) => (
           <div
             key={s.caption}
-            className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-7"
+            className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 sm:p-7"
           >
-            <p className="font-display text-[64px] md:text-[72px] leading-[1] tracking-[-0.03em] text-accent-green font-medium">
+            <p className="font-display text-[44px] sm:text-[56px] md:text-[72px] leading-[1] tracking-[-0.03em] text-accent-green font-medium">
               {s.number}
             </p>
-            <p className="mt-5 text-[15px] text-white/85 leading-[1.5]">
+            <p className="mt-4 sm:mt-5 text-[13px] sm:text-[15px] text-white/85 leading-[1.5]">
               {s.caption}
             </p>
-            <p className="mt-3 text-[13px] text-accent-mint italic">
+            <p className="mt-2 sm:mt-3 text-[12px] sm:text-[13px] text-accent-mint italic">
               {s.sub}
             </p>
           </div>
@@ -412,17 +454,17 @@ function Vision() {
       <Headline tone="light" size="xl" className="mt-6">
         Health data should move the way money does.
       </Headline>
-      <div className="mt-12 max-w-[680px] space-y-5">
-        <p className="text-[18px] md:text-[19px] leading-[1.65] text-accent-ink/70">
+      <div className="mt-8 md:mt-12 max-w-[680px] space-y-4 md:space-y-5">
+        <p className="text-[15px] sm:text-[17px] md:text-[19px] leading-[1.6] md:leading-[1.65] text-accent-ink/70">
           The internet learned to move information. Fintech learned to move
           money. Healthcare in Africa hasn&apos;t yet learned to move its own
           data — coverage, records, payments, and referrals — between the
           systems that need it.
         </p>
-        <p className="text-[20px] md:text-[22px] leading-[1.4] font-medium text-accent-emerald">
+        <p className="text-[17px] sm:text-[20px] md:text-[22px] leading-[1.35] md:leading-[1.4] font-medium text-accent-emerald">
           Pierflow is the missing infrastructure layer.
         </p>
-        <p className="text-[13px] uppercase tracking-[0.22em] text-accent-ink/45 font-medium pt-4">
+        <p className="text-[11px] sm:text-[13px] uppercase tracking-[0.22em] text-accent-ink/45 font-medium pt-2 md:pt-4">
           Neutral · Standards-aligned · AI-native by default
         </p>
       </div>
@@ -452,48 +494,59 @@ function Solution() {
         One API. Every player connected.
       </Headline>
 
-      <div className="mt-12 grid lg:grid-cols-[1fr,auto,1fr] gap-8 items-stretch">
+      <div className="mt-8 md:mt-12 grid lg:grid-cols-[1fr,auto,1fr] gap-4 sm:gap-6 lg:gap-8 items-stretch">
         <ul className="space-y-2">
           {left.map((x) => (
             <li
               key={x.label}
-              className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-3"
+              className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 sm:px-4 py-2.5 sm:py-3"
             >
               <span className="w-7 h-7 rounded-md bg-accent-green/10 text-accent-green grid place-items-center shrink-0">
                 {x.icon}
               </span>
-              <span className="text-[14px] text-white/85">{x.label}</span>
+              <span className="text-[13px] sm:text-[14px] text-white/85">
+                {x.label}
+              </span>
             </li>
           ))}
         </ul>
 
-        <div className="self-center">
-          <div className="hidden lg:flex h-full items-center px-4">
-            <ArrowRight size={20} className="text-accent-green/70" />
-          </div>
+        {/* Horizontal arrow on desktop, vertical on mobile so the flow
+            from sources to surfaces still reads. */}
+        <div className="self-center flex items-center justify-center">
+          <ArrowRight
+            size={18}
+            className="hidden lg:block text-accent-green/70"
+          />
+          <ArrowDown
+            size={16}
+            className="lg:hidden text-accent-green/70 my-1"
+          />
         </div>
 
         <ul className="space-y-2">
           {right.map((x) => (
             <li
               key={x.label}
-              className="flex items-center gap-3 rounded-xl border border-accent-green/30 bg-accent-green/[0.06] px-4 py-3"
+              className="flex items-center gap-3 rounded-xl border border-accent-green/30 bg-accent-green/[0.06] px-3 sm:px-4 py-2.5 sm:py-3"
             >
               <span className="w-7 h-7 rounded-md bg-accent-green/20 text-accent-green grid place-items-center shrink-0">
                 {x.icon}
               </span>
-              <span className="text-[14px] text-white">{x.label}</span>
+              <span className="text-[13px] sm:text-[14px] text-white">
+                {x.label}
+              </span>
             </li>
           ))}
         </ul>
       </div>
 
-      <div className="mt-12 text-center">
-        <div className="inline-flex items-center gap-3 px-5 py-3 rounded-full bg-accent-teal/20 border border-accent-green/30 text-accent-green text-[13px] font-medium">
-          <Network size={14} />
+      <div className="mt-8 md:mt-12 text-center">
+        <div className="inline-flex items-center gap-3 px-4 sm:px-5 py-2.5 sm:py-3 rounded-full bg-accent-teal/20 border border-accent-green/30 text-accent-green text-[12px] sm:text-[13px] font-medium">
+          <Network size={13} />
           Pierflow connectivity layer
         </div>
-        <p className="mt-6 text-[14px] text-white/55 italic">
+        <p className="mt-5 md:mt-6 text-[12px] sm:text-[14px] text-white/55 italic">
           You build the experience. Pierflow moves the data.
         </p>
       </div>
@@ -541,25 +594,29 @@ function Platform() {
         Four capabilities. One canonical API.
       </Headline>
 
-      <div className="mt-10 grid md:grid-cols-2 gap-4">
+      <div className="mt-6 md:mt-10 grid md:grid-cols-2 gap-3 sm:gap-4">
         {caps.map((c) => (
           <div
             key={c.title}
-            className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6"
+            className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-6"
           >
             <div className="flex items-center gap-3">
-              <span className="w-9 h-9 rounded-xl bg-accent-green/10 text-accent-green grid place-items-center">
+              <span className="w-9 h-9 rounded-xl bg-accent-green/10 text-accent-green grid place-items-center shrink-0">
                 {c.icon}
               </span>
-              <div>
-                <p className="text-[15px] font-medium text-white">{c.title}</p>
-                <p className="text-[12px] text-accent-mint">{c.kicker}</p>
+              <div className="min-w-0">
+                <p className="text-[14px] sm:text-[15px] font-medium text-white truncate">
+                  {c.title}
+                </p>
+                <p className="text-[11px] sm:text-[12px] text-accent-mint truncate">
+                  {c.kicker}
+                </p>
               </div>
             </div>
-            <p className="mt-4 text-[13.5px] text-white/70 leading-[1.6]">
+            <p className="mt-3 sm:mt-4 text-[12.5px] sm:text-[13.5px] text-white/70 leading-[1.6]">
               {c.body}
             </p>
-            <code className="mt-4 inline-block text-[12px] font-mono text-textd-tealish bg-black/40 border border-white/[0.06] rounded-md px-2.5 py-1.5">
+            <code className="mt-3 sm:mt-4 inline-block text-[11px] sm:text-[12px] font-mono text-textd-tealish bg-black/40 border border-white/[0.06] rounded-md px-2 sm:px-2.5 py-1 sm:py-1.5 break-all">
               {c.snippet}
             </code>
           </div>
@@ -584,15 +641,15 @@ function RecordsApi() {
         The Pierflow Records API removes that barrier.
       </Sub>
 
-      <div className="mt-10 grid lg:grid-cols-[0.95fr,1.05fr] gap-8 items-start">
+      <div className="mt-6 md:mt-10 grid lg:grid-cols-[0.95fr,1.05fr] gap-6 lg:gap-8 items-start">
         <div>
-          <div className="grid grid-cols-3 gap-3">
-            <Stat number="Thousands" caption="records / day throughput" />
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            <Stat number="1000s" caption="records / day throughput" />
             <Stat number="FHIR R4" caption="compliant output" />
             <Stat number="> 0.9" caption="auto-approval confidence" />
           </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-2 text-[12px] text-white/65">
+          <div className="mt-5 md:mt-6 flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-[12px] text-white/65">
             {[
               "Scan / photograph",
               "AI extract",
@@ -600,8 +657,8 @@ function RecordsApi() {
               "Human review",
               "Import package",
             ].map((step, i) => (
-              <span key={step} className="inline-flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.05] border border-white/[0.08]">
+              <span key={step} className="inline-flex items-center gap-1.5">
+                <span className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-full bg-white/[0.05] border border-white/[0.08]">
                   <span className="text-[10px] text-accent-green font-mono">
                     {i + 1}
                   </span>
@@ -614,7 +671,7 @@ function RecordsApi() {
             ))}
           </div>
 
-          <p className="mt-6 text-[12.5px] leading-[1.65] text-white/55">
+          <p className="mt-5 md:mt-6 text-[12px] sm:text-[12.5px] leading-[1.65] text-white/55">
             Same pipeline supports Pierflow-operated capture (for hospitals
             without digital infrastructure) and partner-direct ingest (for
             EMR vendors with their own scanning operations). Webhooks fire on{" "}
@@ -659,11 +716,11 @@ function RecordsApi() {
 
 function Stat({ number, caption }: { number: string; caption: string }) {
   return (
-    <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-4">
-      <p className="font-display text-[24px] leading-[1.05] tracking-[-0.02em] text-accent-green font-medium">
+    <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 sm:px-4 py-3 sm:py-4">
+      <p className="font-display text-[18px] sm:text-[24px] leading-[1.05] tracking-[-0.02em] text-accent-green font-medium">
         {number}
       </p>
-      <p className="mt-2 text-[11.5px] text-white/65 leading-[1.4]">
+      <p className="mt-1.5 sm:mt-2 text-[10.5px] sm:text-[11.5px] text-white/65 leading-[1.4]">
         {caption}
       </p>
     </div>
@@ -685,7 +742,7 @@ function Impact() {
         outcomes we can attribute and measure.
       </Sub>
 
-      <div className="mt-10 grid md:grid-cols-2 gap-5">
+      <div className="mt-6 md:mt-10 grid md:grid-cols-2 gap-3 sm:gap-5">
         <SdgCard
           tag="SDG 3"
           tagColor="#4C9F38"
@@ -735,7 +792,7 @@ function SdgCard({
   measures: string[];
 }) {
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6">
+    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-6">
       <div className="flex items-center gap-3">
         <span
           className="text-[10px] font-mono uppercase tracking-[0.18em] font-medium px-2 py-1 rounded-md text-white"
@@ -747,22 +804,24 @@ function SdgCard({
           {icon}
         </span>
       </div>
-      <h3 className="mt-4 font-display text-[22px] leading-[1.2] tracking-[-0.01em] text-white font-medium">
+      <h3 className="mt-3 sm:mt-4 font-display text-[18px] sm:text-[22px] leading-[1.2] tracking-[-0.01em] text-white font-medium">
         {title}
       </h3>
-      <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-accent-mint font-medium">
+      <p className="mt-1 text-[10px] sm:text-[11px] uppercase tracking-[0.16em] text-accent-mint font-medium">
         Pierflow lever — {lever}
       </p>
-      <p className="mt-4 text-[13px] text-white/70 leading-[1.65]">{how}</p>
-      <div className="mt-5">
-        <p className="text-[11px] uppercase tracking-[0.14em] text-white/45 font-medium mb-2">
+      <p className="mt-3 sm:mt-4 text-[12px] sm:text-[13px] text-white/70 leading-[1.65]">
+        {how}
+      </p>
+      <div className="mt-4 sm:mt-5">
+        <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.14em] text-white/45 font-medium mb-2">
           How we measure it
         </p>
         <ul className="space-y-1.5">
           {measures.map((m) => (
             <li
               key={m}
-              className="flex items-start gap-2 text-[12px] text-white/65 leading-[1.55]"
+              className="flex items-start gap-2 text-[11.5px] sm:text-[12px] text-white/65 leading-[1.55]"
             >
               <CheckCircle2
                 size={11}
@@ -815,40 +874,42 @@ function Market() {
         A $25B+ market with no connectivity infrastructure.
       </Headline>
 
-      <div className="mt-10 grid lg:grid-cols-[0.9fr,1.1fr] gap-8">
-        <ul className="space-y-3">
+      <div className="mt-6 md:mt-10 grid lg:grid-cols-[0.9fr,1.1fr] gap-6 lg:gap-8">
+        <ul className="grid grid-cols-2 lg:grid-cols-1 gap-2 lg:gap-3 lg:space-y-3">
           {stats.map((s) => (
             <li
               key={s.caption}
-              className="border-l-2 border-accent-green pl-5 py-1"
+              className="border-l-2 border-accent-green pl-4 sm:pl-5 py-1"
             >
-              <p className="font-display text-[34px] leading-[1.05] tracking-[-0.02em] text-accent-green font-medium">
+              <p className="font-display text-[24px] sm:text-[30px] lg:text-[34px] leading-[1.05] tracking-[-0.02em] text-accent-green font-medium">
                 {s.number}
               </p>
-              <p className="mt-1 text-[13px] text-white/70">{s.caption}</p>
+              <p className="mt-1 text-[11.5px] sm:text-[13px] text-white/70 leading-[1.4]">
+                {s.caption}
+              </p>
             </li>
           ))}
         </ul>
 
         <div>
-          <p className="text-[12px] uppercase tracking-[0.16em] text-white/45 font-medium mb-3">
+          <p className="text-[11px] sm:text-[12px] uppercase tracking-[0.16em] text-white/45 font-medium mb-3">
             Early traction
           </p>
           <ul className="space-y-2">
             {partners.map((p) => (
               <li
                 key={p.name}
-                className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-3 flex items-start gap-3"
+                className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 sm:px-4 py-2.5 sm:py-3 flex items-start gap-3"
               >
                 <CheckCircle2
-                  size={14}
-                  className="text-accent-green mt-1 shrink-0"
+                  size={13}
+                  className="text-accent-green mt-0.5 sm:mt-1 shrink-0"
                 />
-                <div>
-                  <p className="text-[13.5px] font-medium text-white">
+                <div className="min-w-0">
+                  <p className="text-[12.5px] sm:text-[13.5px] font-medium text-white">
                     {p.name}
                   </p>
-                  <p className="text-[12px] text-white/65 leading-[1.55] mt-0.5">
+                  <p className="text-[11.5px] sm:text-[12px] text-white/65 leading-[1.55] mt-0.5">
                     {p.body}
                   </p>
                 </div>
@@ -896,19 +957,21 @@ function WhyNow() {
         Four conditions had to be true at once. They are now.
       </Sub>
 
-      <div className="mt-10 grid md:grid-cols-2 gap-4">
+      <div className="mt-6 md:mt-10 grid md:grid-cols-2 gap-3 sm:gap-4">
         {reasons.map((r) => (
           <div
             key={r.title}
-            className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6"
+            className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 sm:p-6"
           >
             <div className="flex items-center gap-3">
-              <span className="w-9 h-9 rounded-xl bg-accent-green/10 text-accent-green grid place-items-center">
+              <span className="w-9 h-9 rounded-xl bg-accent-green/10 text-accent-green grid place-items-center shrink-0">
                 {r.icon}
               </span>
-              <p className="text-[15px] font-medium text-white">{r.title}</p>
+              <p className="text-[13.5px] sm:text-[15px] font-medium text-white leading-[1.3]">
+                {r.title}
+              </p>
             </div>
-            <p className="mt-4 text-[13.5px] text-white/70 leading-[1.65]">
+            <p className="mt-3 sm:mt-4 text-[12.5px] sm:text-[13.5px] text-white/70 leading-[1.65]">
               {r.body}
             </p>
           </div>
@@ -949,42 +1012,42 @@ function Ask() {
         connectivity infrastructure, then expand across West Africa.
       </Sub>
 
-      <div className="mt-10 grid md:grid-cols-3 gap-4">
+      <div className="mt-6 md:mt-10 grid md:grid-cols-3 gap-3 sm:gap-4">
         {blocks.map((b, i) => (
           <div
             key={b.title}
-            className={`rounded-2xl border p-6 ${
+            className={`rounded-2xl border p-4 sm:p-6 ${
               i === 1
                 ? "border-accent-green/40 bg-accent-green/[0.06]"
                 : "border-white/[0.08] bg-white/[0.02]"
             }`}
           >
             <p
-              className={`text-[18px] font-display font-medium tracking-[-0.01em] ${
+              className={`text-[16px] sm:text-[18px] font-display font-medium tracking-[-0.01em] ${
                 i === 1 ? "text-accent-green" : "text-accent-mint"
               }`}
             >
               {b.title}
             </p>
-            <p className="mt-3 text-[13px] text-white/75 leading-[1.65]">
+            <p className="mt-2 sm:mt-3 text-[12.5px] sm:text-[13px] text-white/75 leading-[1.65]">
               {b.body}
             </p>
-            <p className="mt-5 text-[11.5px] font-mono text-white/55 inline-flex items-center gap-1.5">
-              <ArrowRight size={11} className="text-accent-green" />
+            <p className="mt-4 sm:mt-5 text-[11px] sm:text-[11.5px] font-mono text-white/55 inline-flex items-center gap-1.5 break-all">
+              <ArrowRight size={11} className="text-accent-green shrink-0" />
               {b.cta}
             </p>
           </div>
         ))}
       </div>
 
-      <div className="mt-14 flex items-center justify-between flex-wrap gap-4 pt-6 border-t border-white/[0.06]">
+      <div className="mt-10 md:mt-14 flex items-center justify-between flex-wrap gap-4 pt-6 border-t border-white/[0.06]">
         <Logo variant="light" size="md" />
-        <div className="text-[12px] text-white/55 flex items-center gap-4">
+        <div className="text-[11px] sm:text-[12px] text-white/55 flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1">
           <span>pierflow.com</span>
           <span className="opacity-30">·</span>
           <span>hello@pierflow.com</span>
-          <span className="opacity-30">·</span>
-          <span>Built in Lagos · Made for Africa</span>
+          <span className="opacity-30 hidden sm:inline">·</span>
+          <span className="hidden sm:inline">Built in Lagos · Made for Africa</span>
         </div>
       </div>
     </div>
