@@ -1,0 +1,121 @@
+/* Deck — slide layout + print rules.
+ *
+ * Screen: only the active slide is mounted to the viewport, sized to
+ * fill the window (16:9 ratio guideline; we centre on overflow).
+ * Print: every slide becomes a single A4-landscape page.
+ */
+
+.deck {
+  min-height: 100vh;
+}
+
+.deck-slides {
+  position: relative;
+}
+
+.deck-slide {
+  position: relative;
+  width: 100vw;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 5rem;
+  background: #0a0a0a;
+  color: white;
+  overflow: hidden;
+}
+
+/* Subtle dark gradient backdrop on every dark slide, mirroring the
+   site hero so the deck reads as a Pierflow surface, not a deck tool. */
+.deck-slide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      circle at 85% -10%,
+      rgba(13, 206, 154, 0.12),
+      transparent 55%
+    ),
+    radial-gradient(
+      circle at 5% 110%,
+      rgba(10, 124, 110, 0.18),
+      transparent 50%
+    );
+  pointer-events: none;
+}
+
+.deck-slide-light {
+  background: #f7f7f7;
+  color: #0a1f1b;
+}
+
+.deck-slide-light::before {
+  background:
+    radial-gradient(
+      circle at 90% 10%,
+      rgba(13, 206, 154, 0.08),
+      transparent 55%
+    );
+}
+
+.deck-slide-inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1280px;
+}
+
+/* Screen-only show/hide. Print overrides below. */
+.deck-slide-hidden {
+  display: none;
+}
+
+.deck-slide-active {
+  display: flex;
+}
+
+/* ── Print: every slide becomes a page ──────────────────────── */
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 0;
+  }
+
+  body,
+  html {
+    background: #0a0a0a !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Suppress the marketing chrome / portal shells the conditional layout
+     already keeps off /deck, plus the deck's own on-screen controls. */
+  .deck-controls,
+  header,
+  nav {
+    display: none !important;
+  }
+
+  .deck-slide {
+    display: flex !important;
+    min-height: 100vh;
+    height: 100vh;
+    width: 100vw;
+    page-break-after: always;
+    break-after: page;
+    padding: 2.5rem 3rem;
+  }
+
+  .deck-slide:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .deck-slide-hidden,
+  .deck-slide-active {
+    display: flex !important;
+  }
+}

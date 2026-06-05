@@ -5,12 +5,13 @@ import Nav from "./Nav";
 import Footer from "./Footer";
 
 function hasOwnChrome(pathname: string) {
-  // Docs, Portal, and the get-started onboarding flow swap the
-  // marketing chrome for their own.
+  // Docs, Portal, the get-started onboarding flow, and the investor
+  // deck all swap the marketing chrome for their own.
   return (
     pathname.startsWith("/docs") ||
     pathname.startsWith("/portal") ||
-    pathname.startsWith("/get-started")
+    pathname.startsWith("/get-started") ||
+    pathname.startsWith("/deck")
   );
 }
 
