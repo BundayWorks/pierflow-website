@@ -76,6 +76,60 @@ In the meantime, you can complete your company profile and read through the docs
 }
 
 /**
+ * Internal "talk-to-our-team" alert. Goes to every email in
+ * ADMIN_EMAILS when someone submits the home-page contact form.
+ *
+ * Reply-To is set to the submitter's email so hitting reply threads
+ * straight back to them — no copy-paste, no missed lead.
+ */
+export function staffContactInquiryTemplate(input: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  company: string;
+  country?: string | null;
+  phone?: string | null;
+  source?: string | null;
+}) {
+  const lines = [
+    `New contact inquiry from ${input.firstName} ${input.lastName}.`,
+    "",
+    `Name:     ${input.firstName} ${input.lastName}`,
+    `Email:    ${input.email}`,
+    `Company:  ${input.company}`,
+    input.country ? `Country:  ${input.country}` : null,
+    input.phone ? `Phone:    ${input.phone}` : null,
+    input.source ? `Source:   ${input.source}` : null,
+    "",
+    "Reply directly to this email to reach them.",
+    "",
+    "— Pierflow",
+  ].filter(Boolean) as string[];
+  return {
+    subject: `[Pierflow] Inquiry: ${input.company} — ${input.firstName} ${input.lastName}`,
+    text: lines.join("\n"),
+  };
+}
+
+/**
+ * Acknowledgement reply to the visitor who submitted the home-page
+ * contact form, so they know we got it.
+ */
+export function contactInquiryAckTemplate(input: { firstName: string }) {
+  const text = `Hi ${input.firstName || "there"},
+
+Thanks for getting in touch with Pierflow. Your message landed and a member of the team will reply within one business day.
+
+If you'd rather get straight into a sandbox while you wait, you can sign up at https://www.pierflow.com/get-started.
+
+— Pierflow`;
+  return {
+    subject: "Thanks for reaching out — Pierflow",
+    text,
+  };
+}
+
+/**
  * Internal "new partner signed up" alert. Goes to every email in
  * ADMIN_EMAILS so the team sees the request without polling the
  * staff inbox.
