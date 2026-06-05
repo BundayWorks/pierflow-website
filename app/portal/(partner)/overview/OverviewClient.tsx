@@ -20,6 +20,7 @@ import {
   saveSecurityAssessment,
   requestProductionAccess,
 } from "./actions";
+import TryTheApi from "./TryTheApi";
 
 type PartnerInfo = {
   id: string;
@@ -377,18 +378,22 @@ function ChecklistDetail({
 
   if (item === "firstApiCall") {
     return (
-      <div className="mt-4 space-y-3">
-        <p className="text-[12px] text-accent-ink/55 leading-[1.65]">
-          Once your sandbox key is issued, run this from your terminal:
-        </p>
-        <pre className="text-[12px] font-mono bg-dark-bg text-white rounded-md p-3 overflow-x-auto">
+      <div className="mt-4 space-y-4">
+        <div>
+          <p className="text-[12px] text-accent-ink/55 leading-[1.65]">
+            Quickest way from a terminal — replace the key with yours:
+          </p>
+          <pre className="mt-2 text-[12px] font-mono bg-dark-bg text-white rounded-md p-3 overflow-x-auto">
 {`curl -H "Authorization: Bearer pf_test_sk_…" \\
   https://www.pierflow.com/v1/organizations`}
-        </pre>
-        <p className="text-[12px] text-accent-ink/55 leading-[1.65]">
-          We&apos;ll automatically tick this item the next time you hit any
-          /v1/* endpoint.
-        </p>
+          </pre>
+          <p className="mt-2 text-[12px] text-accent-ink/55 leading-[1.65]">
+            We&apos;ll tick this checklist item automatically the next time
+            you hit any <code>/v1/*</code> endpoint with your key.
+          </p>
+        </div>
+
+        <TryTheApi />
       </div>
     );
   }

@@ -1,0 +1,434 @@
+{
+  "info": {
+    "name": "Pierflow Records API",
+    "description": "End-to-end smoke test for the Pierflow partner-facing Records API.\n\nWalks through the full lifecycle: create a scan batch, sign a Cloudinary upload, register the asset as an ingest job, poll until the job validates, then list patients and download an Import Package.\n\n## Setup\n1. Open this collection's Variables tab.\n2. Set `base_url` (default `https://www.pierflow.com`).\n3. Set `api_key` (issue one from `/portal/keys` in your partner portal).\n4. Set `organization_id` to an org you're linked to (see `/portal/organizations`).\n5. Set `sample_image_url` to a publicly reachable image URL — the default points at our hosted mock outpatient card.\n\nThen run the requests in order, or pick 'Run Collection' to fire them top to bottom. Each request's test script auto-populates the next variable (`batch_id`, `job_id`, etc.) so you don't have to copy-paste between steps.\n\n## Auth\nEvery request sends `Authorization: Bearer {{api_key}}`. Keys never leave your server in production.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://www.pierflow.com",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "pf_test_sk_REPLACE_ME",
+      "type": "string"
+    },
+    {
+      "key": "organization_id",
+      "value": "REPLACE_ME",
+      "type": "string"
+    },
+    {
+      "key": "sample_image_url",
+      "value": "https://www.pierflow.com/sample-outpatient-card.svg",
+      "type": "string"
+    },
+    {
+      "key": "batch_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "job_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "patient_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "package_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_url",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_folder",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_timestamp",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_signature",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_api_key",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cloudinary_public_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cloudinary_secure_url",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{api_key}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "1 · Setup",
+      "item": [
+        {
+          "name": "List organizations I can act on",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v1/organizations",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "organizations"]
+            },
+            "description": "Returns every ACTIVE organization your API key has a PartnerOrganizationLink to. If this is empty, register a customer org from /portal/organizations and ask Pierflow staff to approve it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has at least one org', () => pm.expect(body).to.be.an('array').and.have.length.greaterThan(0));",
+                  "// Auto-fill organization_id if not set yet",
+                  "if (!pm.collectionVariables.get('organization_id') || pm.collectionVariables.get('organization_id') === 'REPLACE_ME') {",
+                  "  pm.collectionVariables.set('organization_id', body[0].id);",
+                  "  console.log('Set organization_id =', body[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 · Create a scan batch",
+      "item": [
+        {
+          "name": "POST /v1/scan-batches",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organizationId\": \"{{organization_id}}\",\n  \"label\": \"Smoke test via Postman\",\n  \"priority\": \"NORMAL\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/scan-batches",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "scan-batches"]
+            },
+            "description": "Creates a ScanBatch that subsequent uploads will be grouped under. Batches are how reviewers and the package builder treat a set of pages as a unit."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('batch_id', body.batch_id);",
+                  "console.log('Set batch_id =', body.batch_id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 · Sign a Cloudinary upload",
+      "item": [
+        {
+          "name": "POST /v1/uploads/sign",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organizationId\": \"{{organization_id}}\",\n  \"batchId\": \"{{batch_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/uploads/sign",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "uploads", "sign"]
+            },
+            "description": "Returns a one-shot Cloudinary upload signature. Your client uploads the file directly to Cloudinary using these fields — Pierflow never touches the bytes."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('upload_url', body.uploadUrl);",
+                  "pm.collectionVariables.set('upload_folder', body.folder);",
+                  "pm.collectionVariables.set('upload_timestamp', String(body.timestamp));",
+                  "pm.collectionVariables.set('upload_signature', body.signature);",
+                  "pm.collectionVariables.set('upload_api_key', body.apiKey);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4 · Upload to Cloudinary (multipart)",
+      "item": [
+        {
+          "name": "POST {{upload_url}} (form-data, file)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{upload_url}}", "host": ["{{upload_url}}"] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "description": "Attach an image file here. The first time you run this in Postman, click 'Select Files' and pick a JPG / PNG. For automated runs, use a hosted image and switch this request to a 'remote URL' form field — Cloudinary supports both."
+                },
+                { "key": "api_key", "value": "{{upload_api_key}}" },
+                { "key": "timestamp", "value": "{{upload_timestamp}}" },
+                { "key": "folder", "value": "{{upload_folder}}" },
+                { "key": "type", "value": "upload" },
+                { "key": "signature", "value": "{{upload_signature}}" }
+              ]
+            },
+            "description": "Posts the file straight to Cloudinary using the signature we just got. Returns `public_id` and `secure_url` we hand back to Pierflow on the next step.\n\n**Why not URL upload?** Postman's multipart limits make local-file uploads the most reliable path. If you want to ingest a hosted image without uploading bytes, change the 'file' field's key to 'file' and value to `{{sample_image_url}}` (no file selected) — Cloudinary will pull from the URL."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('cloudinary_public_id', body.public_id);",
+                  "pm.collectionVariables.set('cloudinary_secure_url', body.secure_url);",
+                  "console.log('Uploaded', body.public_id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 · Register the ingest job",
+      "item": [
+        {
+          "name": "POST /v1/ingest/documents",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organizationId\": \"{{organization_id}}\",\n  \"batchId\": \"{{batch_id}}\",\n  \"source\": {\n    \"publicId\": \"{{cloudinary_public_id}}\",\n    \"secureUrl\": \"{{cloudinary_secure_url}}\"\n  },\n  \"documentType\": \"OUTPATIENT_CARD\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/ingest/documents",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "ingest", "documents"]
+            },
+            "description": "Tells Pierflow the asset exists. We return 202 immediately and run extraction asynchronously. Use the job_id returned here to poll for completion."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 202', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('job_id', body.job_id);",
+                  "console.log('Set job_id =', body.job_id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6 · Poll the job",
+      "item": [
+        {
+          "name": "GET /v1/ingest/jobs/:jobId",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v1/ingest/jobs/{{job_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "ingest", "jobs", "{{job_id}}"]
+            },
+            "description": "Returns the current ProcessingJob state. Re-run this every few seconds until status moves out of QUEUED / PROCESSING to AWAITING_REVIEW or VALIDATED."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "console.log('Job status:', body.status);",
+                  "// If the job has produced an extracted record matched to a patient,",
+                  "// pick up the patient_id so subsequent requests have it.",
+                  "const matched = (body.records || []).find(r => r.patient_id);",
+                  "if (matched) {",
+                  "  pm.collectionVariables.set('patient_id', matched.patient_id);",
+                  "  console.log('Set patient_id =', matched.patient_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7 · Patients",
+      "item": [
+        {
+          "name": "GET /v1/organizations/:orgId/patients",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v1/organizations/{{organization_id}}/patients",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "organizations", "{{organization_id}}", "patients"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (Array.isArray(body) && body.length > 0 && !pm.collectionVariables.get('patient_id')) {",
+                  "  pm.collectionVariables.set('patient_id', body[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/organizations/:orgId/patients/:patientId/fhir",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v1/organizations/{{organization_id}}/patients/{{patient_id}}/fhir",
+              "host": ["{{base_url}}"],
+              "path": [
+                "v1",
+                "organizations",
+                "{{organization_id}}",
+                "patients",
+                "{{patient_id}}",
+                "fhir"
+              ]
+            },
+            "description": "Returns a merged FHIR R4 Bundle covering every validated ExtractedRecord on this patient."
+          }
+        }
+      ]
+    },
+    {
+      "name": "8 · Import packages",
+      "item": [
+        {
+          "name": "GET /v1/organizations/:orgId/import-packages",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v1/organizations/{{organization_id}}/import-packages",
+              "host": ["{{base_url}}"],
+              "path": [
+                "v1",
+                "organizations",
+                "{{organization_id}}",
+                "import-packages"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const ready = (Array.isArray(body) ? body : []).find(p => p.status === 'READY');",
+                  "if (ready) pm.collectionVariables.set('package_id', ready.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/import-packages/:packageId/download",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v1/import-packages/{{package_id}}/download",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "import-packages", "{{package_id}}", "download"]
+            },
+            "description": "Returns a short-lived signed Cloudinary URL pointing at the ZIP."
+          }
+        },
+        {
+          "name": "POST /v1/import-packages/:packageId/acknowledge",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imported_count\": 1,\n  \"failed_count\": 0,\n  \"failures\": []\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/import-packages/{{package_id}}/acknowledge",
+              "host": ["{{base_url}}"],
+              "path": [
+                "v1",
+                "import-packages",
+                "{{package_id}}",
+                "acknowledge"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
