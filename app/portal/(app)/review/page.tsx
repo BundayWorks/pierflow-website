@@ -1,6 +1,18 @@
 import Link from "next/link";
-import { listReviewQueue, listReviewTargetOrgs } from "./actions";
-import { AlertTriangle, ArrowRight, FileText, Building2 } from "lucide-react";
+import {
+  listReviewQueue,
+  listReviewTargetOrgs,
+  listMergeCandidates,
+  countPendingMergeCandidates,
+} from "./actions";
+import {
+  AlertTriangle,
+  ArrowRight,
+  FileText,
+  Building2,
+  GitMerge,
+} from "lucide-react";
+import MergeQueue from "./MergeQueue";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +35,10 @@ const DOC_LABELS: Record<string, string> = {
 export default async function ReviewQueuePage({
   searchParams,
 }: {
-  searchParams?: { orgId?: string };
+  searchParams?: { orgId?: string; tab?: string };
 }) {
   const orgs = await listReviewTargetOrgs();
+  const tab = searchParams?.tab === "merge" ? "merge" : "extraction";
 
   if (orgs.length === 0) {
     return (
@@ -62,11 +75,61 @@ export default async function ReviewQueuePage({
         b._count.processingJobs - a._count.processingJobs,
     )[0];
 
-  const queue = await listReviewQueue(activeOrg.id);
+  const [queue, mergePending] = await Promise.all([
+    listReviewQueue(activeOrg.id),
+    countPendingMergeCandidates(activeOrg.id),
+  ]);
+
+  if (tab === "merge") {
+    const candidates = await listMergeCandidates(activeOrg.id);
+    return (
+      <ReviewShell>
+        <OrgPicker orgs={orgs} activeOrgId={activeOrg.id} />
+        <TabStrip
+          activeOrgId={activeOrg.id}
+          tab={tab}
+          mergePending={mergePending}
+        />
+        <MergeQueue
+          candidates={candidates.map((c) => ({
+            id: c.id,
+            score: c.score,
+            reasons: c.reasons,
+            detectedAt: c.detectedAt.toISOString(),
+            primary: {
+              id: c.primaryPatient.id,
+              fullName: c.primaryPatient.fullName,
+              dateOfBirth:
+                c.primaryPatient.dateOfBirth?.toISOString() ?? null,
+              sex: c.primaryPatient.sex,
+              createdAt: c.primaryPatient.createdAt.toISOString(),
+              identifiers: c.primaryPatient.identifiers,
+              recordCount: c.primaryPatient._count.extractedRecords,
+            },
+            candidate: {
+              id: c.candidatePatient.id,
+              fullName: c.candidatePatient.fullName,
+              dateOfBirth:
+                c.candidatePatient.dateOfBirth?.toISOString() ?? null,
+              sex: c.candidatePatient.sex,
+              createdAt: c.candidatePatient.createdAt.toISOString(),
+              identifiers: c.candidatePatient.identifiers,
+              recordCount: c.candidatePatient._count.extractedRecords,
+            },
+          }))}
+        />
+      </ReviewShell>
+    );
+  }
 
   return (
     <ReviewShell>
       <OrgPicker orgs={orgs} activeOrgId={activeOrg.id} />
+      <TabStrip
+        activeOrgId={activeOrg.id}
+        tab={tab}
+        mergePending={mergePending}
+      />
 
       {queue.length === 0 ? (
         <div className="mt-10 rounded-2xl border border-dashed border-black/[0.12] p-10 text-center">
@@ -225,6 +288,62 @@ function OrgPicker({
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+function TabStrip({
+  activeOrgId,
+  tab,
+  mergePending,
+}: {
+  activeOrgId: string;
+  tab: "extraction" | "merge";
+  mergePending: number;
+}) {
+  const tabs: { value: "extraction" | "merge"; label: string; href: string; badge?: number }[] = [
+    {
+      value: "extraction",
+      label: "Extraction queue",
+      href: `/portal/review?orgId=${activeOrgId}`,
+    },
+    {
+      value: "merge",
+      label: "Merge queue",
+      href: `/portal/review?orgId=${activeOrgId}&tab=merge`,
+      badge: mergePending,
+    },
+  ];
+  return (
+    <div className="mt-6 flex items-center gap-2 text-[12px]">
+      {tabs.map((t) => {
+        const active = t.value === tab;
+        return (
+          <Link
+            key={t.value}
+            href={t.href}
+            className={`px-3 py-1.5 rounded-full inline-flex items-center gap-2 ${
+              active
+                ? "bg-accent-ink text-white"
+                : "border border-black/[0.1] text-accent-ink/65 hover:text-accent-ink"
+            }`}
+          >
+            {t.value === "merge" ? <GitMerge size={11} /> : null}
+            {t.label}
+            {t.badge && t.badge > 0 ? (
+              <span
+                className={`text-[10px] font-medium leading-none px-1.5 py-0.5 rounded-full ${
+                  active
+                    ? "bg-white/15 text-white"
+                    : "bg-[#fff4d4] text-[#7a4a00]"
+                }`}
+              >
+                {t.badge > 99 ? "99+" : t.badge}
+              </span>
+            ) : null}
+          </Link>
+        );
+      })}
     </div>
   );
 }

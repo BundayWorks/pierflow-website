@@ -94,6 +94,7 @@ model Organization {
   importPackages      ImportPackage[]
   approvalEvents      OrganizationApprovalEvent[]
   chartFolders        ChartFolder[]
+  mergeCandidates     PatientMergeCandidate[]
   requestedByPartner  Partner?         @relation("OrgsRequestedByPartner", fields: [requestedByPartnerId], references: [id])
 
   @@index([type])
@@ -417,10 +418,49 @@ model Patient {
   extractedRecords    ExtractedRecord[]
   declaredCharts      ChartFolder[]       @relation("ChartFolderDeclaredPatient")
   resolvedCharts      ChartFolder[]       @relation("ChartFolderResolvedPatient")
+  mergePrimaryOf      PatientMergeCandidate[] @relation("PatientMergeCandidatePrimary")
+  mergeCandidateOf    PatientMergeCandidate[] @relation("PatientMergeCandidateCandidate")
 
   @@index([organizationId])
   @@index([fullName])
   @@map("patients")
+}
+
+// Candidate "these two Patient rows are probably the same person"
+// pair. Written by the duplicate-scoring cron; cleared by a reviewer
+// in the Merge queue.
+enum MergeDecision {
+  PENDING
+  MERGE
+  KEEP_SEPARATE
+}
+
+model PatientMergeCandidate {
+  id                  String         @id @default(cuid())
+  organizationId      String
+  // The canonical (older / higher-confidence) patient
+  primaryPatientId    String
+  // The likely duplicate of the primary
+  candidatePatientId  String
+  // 0-1; reviewer typically only sees > 0.5
+  score               Float
+  // Structured breakdown: { mrn_match, name_similarity, dob_match, … }
+  reasons             Json
+  detectedAt          DateTime       @default(now())
+  reviewerExternalId  String?
+  reviewedAt          DateTime?
+  decision            MergeDecision  @default(PENDING)
+  reviewerNotes       String?        @db.Text
+
+  organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  primaryPatient      Patient        @relation("PatientMergeCandidatePrimary", fields: [primaryPatientId], references: [id], onDelete: Cascade)
+  candidatePatient    Patient        @relation("PatientMergeCandidateCandidate", fields: [candidatePatientId], references: [id], onDelete: Cascade)
+
+  // Don't write duplicate rows for the same pair.
+  @@unique([primaryPatientId, candidatePatientId])
+  @@index([organizationId, decision])
+  @@index([decision, detectedAt])
+  @@map("patient_merge_candidates")
 }
 
 // Extensible identifier table — new ID types are new system URIs,

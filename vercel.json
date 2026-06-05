@@ -4,6 +4,10 @@
     {
       "path": "/v1/cron/build-packages",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/v1/cron/reconcile-patients",
+      "schedule": "30 2 * * *"
     }
   ]
 }

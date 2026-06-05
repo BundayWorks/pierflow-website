@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { requireSessionContext } from "@/lib/auth";
 import { buildFhirBundle, type ExtractedJson } from "@/lib/fhir/mapper";
 import { validateExtraction } from "@/lib/validate/rules";
+import { mergePatients } from "@/lib/patients/duplicateScoring";
 
 /**
  * Review surface, scoped by customer organization.
@@ -260,4 +261,117 @@ export async function rejectRecord(input: z.infer<typeof RejectInput>) {
 
   revalidatePath("/portal/review");
   return { ok: true };
+}
+
+/* ── Merge queue ──────────────────────────────────────────── */
+
+export async function listMergeCandidates(organizationId: string) {
+  await assertStaffMayReviewFor(organizationId);
+  return db.patientMergeCandidate.findMany({
+    where: { organizationId, decision: "PENDING" },
+    orderBy: [{ score: "desc" }, { detectedAt: "asc" }],
+    take: 100,
+    select: {
+      id: true,
+      score: true,
+      reasons: true,
+      detectedAt: true,
+      primaryPatient: {
+        select: {
+          id: true,
+          fullName: true,
+          dateOfBirth: true,
+          sex: true,
+          createdAt: true,
+          identifiers: { select: { system: true, value: true }, take: 6 },
+          _count: { select: { extractedRecords: true } },
+        },
+      },
+      candidatePatient: {
+        select: {
+          id: true,
+          fullName: true,
+          dateOfBirth: true,
+          sex: true,
+          createdAt: true,
+          identifiers: { select: { system: true, value: true }, take: 6 },
+          _count: { select: { extractedRecords: true } },
+        },
+      },
+    },
+  });
+}
+
+const MergeInput = z.object({
+  candidateRowId: z.string().min(1),
+  reviewerNotes: z.string().max(2000).optional(),
+});
+
+export async function acceptMerge(input: z.infer<typeof MergeInput>) {
+  const ctx = await requireSessionContext();
+  const parsed = MergeInput.parse(input);
+
+  const row = await db.patientMergeCandidate.findUnique({
+    where: { id: parsed.candidateRowId },
+    select: {
+      id: true,
+      organizationId: true,
+      primaryPatientId: true,
+      candidatePatientId: true,
+      decision: true,
+    },
+  });
+  if (!row) throw new Error("CANDIDATE_NOT_FOUND");
+  await assertStaffMayReviewFor(row.organizationId);
+  if (row.decision !== "PENDING") throw new Error("ALREADY_DECIDED");
+
+  await mergePatients({
+    primaryPatientId: row.primaryPatientId,
+    candidatePatientId: row.candidatePatientId,
+    reviewerExternalId: ctx.externalId,
+    reviewerNotes: parsed.reviewerNotes,
+  });
+
+  revalidatePath("/portal/review");
+  return { ok: true };
+}
+
+export async function keepSeparate(input: z.infer<typeof MergeInput>) {
+  const ctx = await requireSessionContext();
+  const parsed = MergeInput.parse(input);
+
+  const row = await db.patientMergeCandidate.findUnique({
+    where: { id: parsed.candidateRowId },
+    select: { id: true, organizationId: true, decision: true },
+  });
+  if (!row) throw new Error("CANDIDATE_NOT_FOUND");
+  await assertStaffMayReviewFor(row.organizationId);
+  if (row.decision !== "PENDING") throw new Error("ALREADY_DECIDED");
+
+  await db.patientMergeCandidate.update({
+    where: { id: row.id },
+    data: {
+      decision: "KEEP_SEPARATE",
+      reviewerExternalId: ctx.externalId,
+      reviewerNotes: parsed.reviewerNotes ?? null,
+      reviewedAt: new Date(),
+    },
+  });
+  revalidatePath("/portal/review");
+  return { ok: true };
+}
+
+export async function countPendingMergeCandidates(
+  organizationId: string,
+): Promise<number> {
+  // Best-effort; called from the page header so we don't throw on
+  // unexpected errors — show 0 instead.
+  try {
+    await requireSessionContext();
+    return db.patientMergeCandidate.count({
+      where: { organizationId, decision: "PENDING" },
+    });
+  } catch {
+    return 0;
+  }
 }

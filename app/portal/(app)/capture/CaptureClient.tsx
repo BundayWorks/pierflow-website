@@ -20,6 +20,7 @@ import {
   Folder,
   FolderOpen,
   UserPlus,
+  RotateCcw,
 } from "lucide-react";
 import {
   createBatch,
@@ -28,6 +29,8 @@ import {
   listRecentBatches,
   startChartFolder,
   closeChartFolder,
+  reopenChartFolder,
+  listBatchChartFolders,
   searchPatientsForChart,
 } from "./actions";
 
@@ -232,6 +235,9 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
   const [patientSearch, setPatientSearch] = useState("");
   const [patientHits, setPatientHits] = useState<PatientHit[]>([]);
   const [chartPageCount, setChartPageCount] = useState(0);
+  const [batchCharts, setBatchCharts] = useState<
+    Awaited<ReturnType<typeof listBatchChartFolders>>
+  >([]);
 
   // Hydrate the previously-selected org from localStorage so an
   // operator who reloads the page keeps their context. Validate against
@@ -379,6 +385,26 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
     setChartPageCount(0);
   }
 
+  // Reload the batch's charts (open + closed) when the batch changes
+  // and after every chart action so the list of "previous charts" stays
+  // fresh without a full page refresh.
+  const refreshBatchCharts = useCallback(async () => {
+    if (!activeBatchId) {
+      setBatchCharts([]);
+      return;
+    }
+    try {
+      const rows = await listBatchChartFolders(activeBatchId);
+      setBatchCharts(rows);
+    } catch {
+      setBatchCharts([]);
+    }
+  }, [activeBatchId]);
+
+  useEffect(() => {
+    void refreshBatchCharts();
+  }, [refreshBatchCharts]);
+
   const startChart = () => {
     if (!activeBatchId) return;
     startTransition(async () => {
@@ -395,6 +421,7 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
         });
         setActiveChartFolderId(chartFolderId);
         setChartPageCount(0);
+        await refreshBatchCharts();
       } catch (err) {
         window.alert(
           err instanceof Error ? err.message : "Couldn't start chart.",
@@ -408,7 +435,25 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
     if (!id) return;
     setActiveChartFolderId(null);
     resetChartInputs();
-    void closeChartFolder(id).catch(() => {});
+    void closeChartFolder(id)
+      .then(() => refreshBatchCharts())
+      .catch(() => {});
+  };
+
+  const reopenChart = (id: string, hint: { label?: string | null; pageCount: number }) => {
+    startTransition(async () => {
+      try {
+        await reopenChartFolder(id);
+        setActiveChartFolderId(id);
+        setChartPageCount(hint.pageCount);
+        setChartLabel(hint.label ?? "");
+        await refreshBatchCharts();
+      } catch (err) {
+        window.alert(
+          err instanceof Error ? err.message : "Couldn't reopen chart.",
+        );
+      }
+    });
   };
 
   const uploadOne = useCallback(
@@ -841,6 +886,79 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
             </button>
           </div>
         )}
+
+        {/* Previous charts in this batch — re-openable so an operator
+            can add a forgotten page to a chart they already closed. */}
+        {batchCharts.length > 0 && !activeChartFolderId ? (
+          <div className="rounded-2xl border border-black/[0.08] p-4 mb-6">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-accent-ink/55 font-medium mb-2">
+              Previous charts in this batch
+            </p>
+            <ul className="space-y-1.5">
+              {batchCharts.map((c) => {
+                const name =
+                  c.resolvedPatient?.fullName ??
+                  c.declaredPatient?.fullName ??
+                  c.label ??
+                  (c.declaredMrn ? `MRN ${c.declaredMrn}` : "Unnamed chart");
+                const status = !c.closedAt
+                  ? "Open"
+                  : c.resolvedSource === "UNRESOLVED"
+                    ? "Closed — resolving…"
+                    : `Resolved · ${c.resolvedSource
+                        .replace(/_/g, " ")
+                        .toLowerCase()}`;
+                return (
+                  <li
+                    key={c.id}
+                    className="flex items-center gap-3 rounded-md hover:bg-bgl-alt px-2.5 py-2"
+                  >
+                    <span className="w-6 h-6 rounded-md bg-accent-teal-light text-accent-emerald grid place-items-center shrink-0">
+                      <Folder size={12} />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] text-accent-ink truncate">
+                        {name}
+                      </p>
+                      <p className="text-[11px] text-accent-ink/55 truncate">
+                        {c.pageCount} page{c.pageCount === 1 ? "" : "s"} ·{" "}
+                        {status}
+                      </p>
+                    </div>
+                    {c.closedAt ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          reopenChart(c.id, {
+                            label: c.label,
+                            pageCount: c.pageCount,
+                          })
+                        }
+                        disabled={isPending}
+                        className="text-[11px] text-accent-emerald hover:underline inline-flex items-center gap-1 shrink-0 disabled:opacity-50"
+                      >
+                        <RotateCcw size={11} />
+                        Reopen
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveChartFolderId(c.id);
+                          setChartPageCount(c.pageCount);
+                          setChartLabel(c.label ?? "");
+                        }}
+                        className="text-[11px] text-accent-emerald hover:underline shrink-0"
+                      >
+                        Resume
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
 
         {/* Capture trigger card */}
         <div className="rounded-2xl border border-black/[0.08] p-6 mb-6">

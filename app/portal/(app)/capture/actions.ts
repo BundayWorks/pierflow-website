@@ -289,6 +289,87 @@ export async function closeChartFolder(chartFolderId: string) {
 }
 
 /**
+ * Re-open a previously-closed chart so the operator can add more
+ * pages. Clears `closedAt` and `resolvedAt` so the next close round
+ * triggers a fresh resolution pass. The previous resolution (if any)
+ * is kept as `resolvedPatientId` so already-attached records stay
+ * attached until re-resolution picks something different.
+ */
+export async function reopenChartFolder(chartFolderId: string) {
+  await requireSessionContext();
+  const folder = await db.chartFolder.findUnique({
+    where: { id: chartFolderId },
+    select: { id: true, organizationId: true, closedAt: true },
+  });
+  if (!folder) throw new Error("CHART_FOLDER_NOT_FOUND");
+  await assertStaffMayCaptureFor(folder.organizationId);
+  if (!folder.closedAt) return { ok: true }; // already open
+
+  await db.chartFolder.update({
+    where: { id: folder.id },
+    data: { closedAt: null, resolvedAt: null },
+  });
+  revalidatePath("/portal/capture");
+  return { ok: true };
+}
+
+/**
+ * Force the identity resolver to run again on a chart folder. Used
+ * after a reviewer fixes a wrong name on one of the pages — the next
+ * resolution can pick a different Patient now that the canonical
+ * evidence has changed. Idempotent and safe to call any time.
+ */
+export async function resolveChartFolderNow(chartFolderId: string) {
+  await requireSessionContext();
+  const folder = await db.chartFolder.findUnique({
+    where: { id: chartFolderId },
+    select: { id: true, organizationId: true },
+  });
+  if (!folder) throw new Error("CHART_FOLDER_NOT_FOUND");
+  await assertStaffMayCaptureFor(folder.organizationId);
+
+  const { resolveChartFolderIdentity } = await import(
+    "@/lib/extraction/resolveChartFolderIdentity"
+  );
+  const outcome = await resolveChartFolderIdentity(folder.id);
+  revalidatePath("/portal/capture");
+  revalidatePath("/portal/review");
+  return outcome;
+}
+
+/**
+ * List the chart folders the operator can resume capturing into for a
+ * given batch. Includes closed folders so the operator can reopen one
+ * if they realise they missed a page.
+ */
+export async function listBatchChartFolders(batchId: string) {
+  await requireSessionContext();
+  const batch = await db.scanBatch.findUnique({
+    where: { id: batchId },
+    select: { organizationId: true },
+  });
+  if (!batch) return [];
+  await assertStaffMayCaptureFor(batch.organizationId);
+  return db.chartFolder.findMany({
+    where: { batchId },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      label: true,
+      declaredMrn: true,
+      declaredPatientId: true,
+      declaredPatient: { select: { id: true, fullName: true } },
+      pageCount: true,
+      closedAt: true,
+      createdAt: true,
+      resolvedSource: true,
+      resolvedConfidence: true,
+      resolvedPatient: { select: { id: true, fullName: true } },
+    },
+  });
+}
+
+/**
  * Look up patients in the current org so the operator can pick one
  * before opening a chart. Returns the top N by name match.
  */
