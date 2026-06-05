@@ -41,6 +41,12 @@ const SourceAsset = z.object({
 const Body = z.object({
   organizationId: z.string().min(1).optional(),
   batchId: z.string().min(1),
+  /**
+   * Optional chart-folder id this page belongs to. When set, the
+   * extracted record's identity is resolved at folder level once the
+   * folder closes (see lib/extraction/resolveChartFolderIdentity).
+   */
+  chartFolderId: z.string().min(1).optional(),
   source: SourceAsset,
   filename: z.string().max(255).optional(),
   documentType: z
@@ -101,6 +107,22 @@ export async function POST(req: Request) {
     return notFound("BATCH_NOT_FOUND");
   }
 
+  // If a chart folder was supplied, validate it belongs to this batch
+  // and that it isn't already closed (closed folders are eligible for
+  // resolution and shouldn't take new pages).
+  if (body.chartFolderId) {
+    const folder = await db.chartFolder.findUnique({
+      where: { id: body.chartFolderId },
+      select: { id: true, batchId: true, closedAt: true },
+    });
+    if (!folder || folder.batchId !== body.batchId) {
+      return notFound("CHART_FOLDER_NOT_FOUND");
+    }
+    if (folder.closedAt) {
+      return validationError({ chartFolderId: "CHART_FOLDER_CLOSED" });
+    }
+  }
+
   // Idempotency: same key in the same org returns the original row.
   if (body.idempotencyKey) {
     const existing = await db.processingJob.findUnique({
@@ -131,6 +153,7 @@ export async function POST(req: Request) {
     data: {
       batchId: body.batchId,
       organizationId,
+      chartFolderId: body.chartFolderId ?? null,
       sourceAsset: body.source as object,
       sourceFilename: body.filename ?? null,
       pageCount: body.pageCount ?? 1,
@@ -141,6 +164,17 @@ export async function POST(req: Request) {
     },
     select: { id: true, batchId: true, status: true, pageCount: true },
   });
+
+  // Maintain the folder's page count so the capture UI can show
+  // progress without a join on every list query.
+  if (body.chartFolderId) {
+    void db.chartFolder
+      .update({
+        where: { id: body.chartFolderId },
+        data: { pageCount: { increment: 1 } },
+      })
+      .catch(() => {});
+  }
 
   // Fire-and-forget extraction. Vercel Fluid Compute keeps the function
   // instance alive past the response.

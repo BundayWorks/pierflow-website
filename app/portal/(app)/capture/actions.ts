@@ -178,9 +178,24 @@ export async function getBatchForCapture(batchId: string) {
           id: true,
           status: true,
           recordTypeHint: true,
+          chartFolderId: true,
           sourceAsset: true,
           sourceFilename: true,
           createdAt: true,
+        },
+      },
+      chartFolders: {
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          label: true,
+          declaredMrn: true,
+          declaredPatientId: true,
+          declaredPatient: { select: { id: true, fullName: true } },
+          pageCount: true,
+          closedAt: true,
+          resolvedSource: true,
+          resolvedPatient: { select: { id: true, fullName: true } },
         },
       },
     },
@@ -188,4 +203,143 @@ export async function getBatchForCapture(batchId: string) {
   if (!batch) return null;
   await assertStaffMayCaptureFor(batch.organizationId);
   return batch;
+}
+
+/* ── Chart folders ────────────────────────────────────────── */
+
+const StartChartInput = z.object({
+  batchId: z.string().min(1),
+  // Operator declarations — both optional.
+  declaredPatientId: z.string().min(1).optional(),
+  declaredMrn: z.string().trim().max(80).optional(),
+  label: z.string().trim().max(160).optional(),
+});
+
+/**
+ * Open a new chart inside a batch. The operator photographs pages
+ * while the chart is open, then calls closeChartFolder() and the
+ * next addFiles() goes into a fresh chart.
+ */
+export async function startChartFolder(
+  input: z.infer<typeof StartChartInput>,
+) {
+  const ctx = await requireSessionContext();
+  const parsed = StartChartInput.parse(input);
+
+  const batch = await db.scanBatch.findUnique({
+    where: { id: parsed.batchId },
+    select: { id: true, organizationId: true },
+  });
+  if (!batch) throw new Error("BATCH_NOT_FOUND");
+  await assertStaffMayCaptureFor(batch.organizationId);
+
+  if (parsed.declaredPatientId) {
+    const patient = await db.patient.findFirst({
+      where: { id: parsed.declaredPatientId, organizationId: batch.organizationId },
+      select: { id: true },
+    });
+    if (!patient) throw new Error("DECLARED_PATIENT_NOT_FOUND");
+  }
+
+  const folder = await db.chartFolder.create({
+    data: {
+      batchId: batch.id,
+      organizationId: batch.organizationId,
+      label: parsed.label?.length ? parsed.label : null,
+      operatorId: ctx.externalId,
+      declaredPatientId: parsed.declaredPatientId ?? null,
+      declaredMrn: parsed.declaredMrn?.length ? parsed.declaredMrn : null,
+    },
+    select: { id: true },
+  });
+  revalidatePath("/portal/capture");
+  return { chartFolderId: folder.id };
+}
+
+export async function closeChartFolder(chartFolderId: string) {
+  await requireSessionContext();
+  const folder = await db.chartFolder.findUnique({
+    where: { id: chartFolderId },
+    select: { id: true, organizationId: true, closedAt: true },
+  });
+  if (!folder) throw new Error("CHART_FOLDER_NOT_FOUND");
+  await assertStaffMayCaptureFor(folder.organizationId);
+
+  if (!folder.closedAt) {
+    await db.chartFolder.update({
+      where: { id: folder.id },
+      data: { closedAt: new Date() },
+    });
+  }
+
+  // Attempt resolution now in case every job in the folder has already
+  // finished extracting. If some are still in flight, the extraction
+  // worker will re-trigger when the last one lands.
+  try {
+    const { maybeResolveChartFolderForJob } = await import(
+      "@/lib/extraction/chartFolderTrigger"
+    );
+    await maybeResolveChartFolderForJob(folder.id);
+  } catch {
+    // best-effort — resolver will run via extraction trigger
+  }
+
+  revalidatePath("/portal/capture");
+  return { ok: true };
+}
+
+/**
+ * Look up patients in the current org so the operator can pick one
+ * before opening a chart. Returns the top N by name match.
+ */
+const SearchPatientsInput = z.object({
+  organizationId: z.string().min(1),
+  query: z.string().trim().max(80),
+});
+
+export async function searchPatientsForChart(
+  input: z.infer<typeof SearchPatientsInput>,
+) {
+  await requireSessionContext();
+  const parsed = SearchPatientsInput.parse(input);
+  await assertStaffMayCaptureFor(parsed.organizationId);
+  const q = parsed.query;
+  if (q.length < 2) return [];
+  return db.patient.findMany({
+    where: {
+      organizationId: parsed.organizationId,
+      OR: [
+        { fullName: { contains: q, mode: "insensitive" } },
+        {
+          identifiers: {
+            some: { value: { contains: q, mode: "insensitive" } },
+          },
+        },
+      ],
+    },
+    take: 10,
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      fullName: true,
+      dateOfBirth: true,
+      identifiers: {
+        take: 3,
+        select: { system: true, value: true },
+      },
+    },
+  });
+}
+
+/** Increment pageCount on the folder when a new job is registered. */
+export async function bumpChartFolderPageCount(
+  chartFolderId: string,
+  organizationId: string,
+) {
+  await requireSessionContext();
+  await assertStaffMayCaptureFor(organizationId);
+  await db.chartFolder.update({
+    where: { id: chartFolderId },
+    data: { pageCount: { increment: 1 } },
+  });
 }

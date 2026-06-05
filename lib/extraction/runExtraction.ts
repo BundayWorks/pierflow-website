@@ -15,6 +15,7 @@ import { buildFhirBundle, type ExtractedJson } from "@/lib/fhir/mapper";
 import { validateExtraction } from "@/lib/validate/rules";
 import type { RecordValidationStatus } from "@prisma/client";
 import { emitFireAndForget } from "@/lib/webhooks";
+import { maybeResolveChartFolderForJob } from "./chartFolderTrigger";
 
 export async function runExtractionForJob(jobId: string): Promise<void> {
   // Atomic claim — only one worker can advance a QUEUED job at a time.
@@ -30,6 +31,7 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
     select: {
       id: true,
       organizationId: true,
+      chartFolderId: true,
       sourceAsset: true,
       recordTypeHint: true,
       pageCount: true,
@@ -115,6 +117,18 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
       }),
     ]);
 
+    // Resolve the chart folder's identity if this job was the last
+    // one outstanding in a closed folder. Best-effort: failures here
+    // don't roll back the job (we'd rather have an extracted record
+    // unattached to a patient than lose it).
+    if (job.chartFolderId) {
+      void maybeResolveChartFolderForJob(job.chartFolderId).catch((err) => {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[runExtraction] chart-folder resolve failed:", err);
+        }
+      });
+    }
+
     // Notify partners linked to this org. processing_job.completed
     // fires for both auto-approved and review-required outcomes.
     await emitProcessingJobEvent(
@@ -143,8 +157,14 @@ async function markFailed(jobId: string, code: string, detail: string) {
       errorDetail: detail,
       completedAt: new Date(),
     },
-    select: { id: true, organizationId: true },
+    select: { id: true, organizationId: true, chartFolderId: true },
   });
+  // Try resolution even after a failure — if other pages in the
+  // folder extracted successfully we can still pick a patient from
+  // those.
+  if (job.chartFolderId) {
+    void maybeResolveChartFolderForJob(job.chartFolderId).catch(() => {});
+  }
   await emitProcessingJobEvent(
     job.id,
     job.organizationId,

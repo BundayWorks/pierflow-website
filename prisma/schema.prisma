@@ -93,6 +93,7 @@ model Organization {
   extractedRecords    ExtractedRecord[]
   importPackages      ImportPackage[]
   approvalEvents      OrganizationApprovalEvent[]
+  chartFolders        ChartFolder[]
   requestedByPartner  Partner?         @relation("OrgsRequestedByPartner", fields: [requestedByPartnerId], references: [id])
 
   @@index([type])
@@ -414,6 +415,8 @@ model Patient {
   possibleDuplicates  Patient[]           @relation("PatientDuplicate")
   identifiers         PatientIdentifier[]
   extractedRecords    ExtractedRecord[]
+  declaredCharts      ChartFolder[]       @relation("ChartFolderDeclaredPatient")
+  resolvedCharts      ChartFolder[]       @relation("ChartFolderResolvedPatient")
 
   @@index([organizationId])
   @@index([fullName])
@@ -489,15 +492,91 @@ model ScanBatch {
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   site           Site?         @relation(fields: [siteId], references: [id])
   jobs           ProcessingJob[]
+  chartFolders   ChartFolder[]
 
   @@index([organizationId])
   @@map("scan_batches")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Chart folders — group pages photographed for one patient's chart so
+// identity is resolved at folder level instead of page-by-page.
+//
+// An operator opens a chart, photographs N pages, then closes the chart
+// and moves on. Every ProcessingJob created while the chart is open
+// carries `chartFolderId`. After the last job in the folder reaches a
+// terminal state, resolveChartFolderIdentity() picks a Patient based on
+// (in order): operator declaration, MRN lookup, fuzzy match across the
+// folder's extracted evidence, or a new placeholder Patient.
+// ─────────────────────────────────────────────────────────────────────
+
+enum ChartFolderResolution {
+  // No resolution attempted yet (e.g. jobs still extracting)
+  UNRESOLVED
+  // Operator picked an existing Patient at capture time
+  DECLARED_BY_OPERATOR
+  // Operator typed an MRN that matched an existing PatientIdentifier
+  MRN_LOOKUP
+  // Best-evidence fuzzy match across the folder's ExtractedRecords
+  FUZZY_MATCH
+  // Created a new Patient (no operator declaration, no MRN match)
+  NEW_PATIENT
+}
+
+model ChartFolder {
+  id                   String   @id @default(cuid())
+  batchId              String
+  organizationId       String
+  // Optional operator-facing label, e.g. "Mrs Adaeze Nwosu"
+  label                String?
+  // Clerk user id of the operator who created the chart
+  operatorId           String?
+
+  // ── Operator-declared identity at capture time. All optional. ──
+  declaredPatientId    String?
+  // Free-text MRN the operator typed. Resolved against PatientIdentifier
+  // during reconciliation.
+  declaredMrn          String?
+  declaredAt           DateTime @default(now())
+
+  // ── Identity resolved post-extraction. Set by the resolver. ────
+  resolvedPatientId    String?
+  resolvedAt           DateTime?
+  resolvedConfidence   Float?
+  resolvedSource       ChartFolderResolution @default(UNRESOLVED)
+  // Free-text notes a reviewer may attach (e.g. "merged from chart Y")
+  reviewerNotes        String?  @db.Text
+
+  // Counters maintained by capture so we can show progress without
+  // a join on every list query.
+  pageCount            Int      @default(0)
+  // Closed = no new pages will be added. We can still re-resolve.
+  closedAt             DateTime?
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  batch                ScanBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  declaredPatient      Patient?     @relation("ChartFolderDeclaredPatient", fields: [declaredPatientId], references: [id])
+  resolvedPatient      Patient?     @relation("ChartFolderResolvedPatient", fields: [resolvedPatientId], references: [id])
+  jobs                 ProcessingJob[]
+
+  @@index([batchId])
+  @@index([organizationId])
+  @@index([resolvedSource])
+  @@map("chart_folders")
 }
 
 model ProcessingJob {
   id              String        @id @default(cuid())
   batchId         String
   organizationId  String
+  // Optional chart this page belongs to. Pages with the same
+  // chartFolderId resolve to the same Patient post-extraction.
+  // Nullable for backward compat: pre-ChartFolder jobs treat themselves
+  // as a single-page chart.
+  chartFolderId   String?
   // Object reference in Cloudinary: { publicId, version, format, width, height, bytes }
   sourceAsset     Json
   sourceFilename  String?
@@ -518,10 +597,12 @@ model ProcessingJob {
 
   batch           ScanBatch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
   organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  chartFolder     ChartFolder?    @relation(fields: [chartFolderId], references: [id], onDelete: SetNull)
   extractedRecords ExtractedRecord[]
 
   @@unique([organizationId, idempotencyKey])
   @@index([batchId])
+  @@index([chartFolderId])
   @@index([organizationId, status])
   @@map("processing_jobs")
 }

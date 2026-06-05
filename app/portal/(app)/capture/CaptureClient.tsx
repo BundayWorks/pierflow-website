@@ -17,12 +17,18 @@ import {
   Plus,
   Building2,
   ChevronDown,
+  Folder,
+  FolderOpen,
+  UserPlus,
 } from "lucide-react";
 import {
   createBatch,
   deleteJob,
   getBatchForCapture,
   listRecentBatches,
+  startChartFolder,
+  closeChartFolder,
+  searchPatientsForChart,
 } from "./actions";
 
 /* ── Domain types ────────────────────────────────────────────── */
@@ -125,6 +131,7 @@ type CloudinaryUploadResult = {
 async function registerIngest(input: {
   organizationId: string;
   batchId: string;
+  chartFolderId?: string;
   source: CloudinaryUploadResult;
   filename?: string;
   documentType: DocumentType;
@@ -135,6 +142,7 @@ async function registerIngest(input: {
     body: JSON.stringify({
       organizationId: input.organizationId,
       batchId: input.batchId,
+      chartFolderId: input.chartFolderId,
       filename: input.filename,
       documentType: input.documentType,
       source: {
@@ -193,6 +201,13 @@ function uploadToCloudinary(
 
 /* ── Component ───────────────────────────────────────────────── */
 
+type PatientHit = {
+  id: string;
+  fullName: string;
+  dateOfBirth: Date | null;
+  identifiers: { system: string; value: string }[];
+};
+
 export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [orgPickerOpen, setOrgPickerOpen] = useState(false);
@@ -203,6 +218,20 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [isPending, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // ── Chart folder state ───────────────────────────────────────
+  // activeChartFolderId is set while an operator is photographing a
+  // chart. When null, captured pages go straight into the batch with
+  // no folder (legacy single-page behaviour).
+  const [activeChartFolderId, setActiveChartFolderId] = useState<string | null>(
+    null,
+  );
+  const [chartLabel, setChartLabel] = useState("");
+  const [chartMrn, setChartMrn] = useState("");
+  const [pickedPatient, setPickedPatient] = useState<PatientHit | null>(null);
+  const [patientSearch, setPatientSearch] = useState("");
+  const [patientHits, setPatientHits] = useState<PatientHit[]>([]);
+  const [chartPageCount, setChartPageCount] = useState(0);
 
   // Hydrate the previously-selected org from localStorage so an
   // operator who reloads the page keeps their context. Validate against
@@ -253,6 +282,8 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
     setOrgPickerOpen(false);
     setActiveBatchId(null);
     setQueue([]);
+    setActiveChartFolderId(null);
+    resetChartInputs();
     try {
       localStorage.setItem(ORG_SELECTION_KEY, orgId);
     } catch {}
@@ -315,6 +346,71 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
     });
   };
 
+  // ── Chart folder handlers ────────────────────────────────────
+  // Debounced patient search runs while the operator types in the
+  // "Pick existing patient" search box.
+  useEffect(() => {
+    if (!activeOrgId) return;
+    const q = patientSearch.trim();
+    if (q.length < 2) {
+      setPatientHits([]);
+      return;
+    }
+    const handle = setTimeout(async () => {
+      try {
+        const rows = await searchPatientsForChart({
+          organizationId: activeOrgId,
+          query: q,
+        });
+        setPatientHits(rows);
+      } catch {
+        setPatientHits([]);
+      }
+    }, 220);
+    return () => clearTimeout(handle);
+  }, [patientSearch, activeOrgId]);
+
+  function resetChartInputs() {
+    setChartLabel("");
+    setChartMrn("");
+    setPickedPatient(null);
+    setPatientSearch("");
+    setPatientHits([]);
+    setChartPageCount(0);
+  }
+
+  const startChart = () => {
+    if (!activeBatchId) return;
+    startTransition(async () => {
+      try {
+        const { chartFolderId } = await startChartFolder({
+          batchId: activeBatchId,
+          declaredPatientId: pickedPatient?.id,
+          declaredMrn: chartMrn.trim() || undefined,
+          label:
+            chartLabel.trim() ||
+            pickedPatient?.fullName ||
+            (chartMrn.trim() ? `MRN ${chartMrn.trim()}` : undefined) ||
+            undefined,
+        });
+        setActiveChartFolderId(chartFolderId);
+        setChartPageCount(0);
+      } catch (err) {
+        window.alert(
+          err instanceof Error ? err.message : "Couldn't start chart.",
+        );
+      }
+    });
+  };
+
+  const finishChart = () => {
+    const id = activeChartFolderId;
+    if (!id) return;
+    setActiveChartFolderId(null);
+    resetChartInputs();
+    void closeChartFolder(id).catch(() => {});
+  };
+
   const uploadOne = useCallback(
     async (item: QueueItem) => {
       if (!activeOrgId || !activeBatchId || !item.file) return;
@@ -350,10 +446,12 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
         const reg = await registerIngest({
           organizationId: activeOrgId,
           batchId: activeBatchId,
+          chartFolderId: activeChartFolderId ?? undefined,
           source: out,
           filename: file.name,
           documentType: item.documentType,
         });
+        if (activeChartFolderId) setChartPageCount((n) => n + 1);
 
         setQueue((q) =>
           q.map((x) =>
@@ -373,7 +471,7 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
         );
       }
     },
-    [activeOrgId, activeBatchId],
+    [activeOrgId, activeBatchId, activeChartFolderId],
   );
 
   const addFiles = useCallback(
@@ -594,12 +692,155 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
           </div>
           <button
             type="button"
-            onClick={() => setActiveBatchId(null)}
+            onClick={() => {
+              setActiveBatchId(null);
+              setActiveChartFolderId(null);
+              resetChartInputs();
+            }}
             className="text-[13px] text-accent-ink/55 hover:text-accent-ink"
           >
             ← Change batch
           </button>
         </div>
+
+        {/* Chart folder panel — declare whose chart we're on so all
+            pages photographed from this point land on the same Patient
+            after extraction. */}
+        {activeChartFolderId ? (
+          <div className="rounded-2xl border border-accent-emerald/40 bg-card-mint p-5 mb-6">
+            <div className="flex items-start gap-3">
+              <span className="w-9 h-9 rounded-xl bg-accent-emerald/15 text-accent-emerald grid place-items-center shrink-0">
+                <FolderOpen size={16} />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[12px] uppercase tracking-[0.14em] text-accent-emerald font-medium">
+                  Active chart
+                </p>
+                <p className="mt-1 text-[15px] font-medium text-accent-ink truncate">
+                  {pickedPatient?.fullName ??
+                    chartLabel.trim() ??
+                    (chartMrn.trim() ? `MRN ${chartMrn.trim()}` : "Unnamed chart")}
+                </p>
+                <p className="mt-1 text-[12px] text-accent-ink/65">
+                  {chartPageCount} page{chartPageCount === 1 ? "" : "s"} captured so far. New
+                  captures will be attached to this chart.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={finishChart}
+                disabled={isPending}
+                className="text-[12px] font-medium px-3 py-2 rounded-md border border-black/[0.12] text-accent-ink hover:border-black/30 disabled:opacity-50 inline-flex items-center gap-1.5"
+              >
+                <CheckCircle2 size={13} />
+                Finish chart
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-black/[0.08] p-5 mb-6">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="w-9 h-9 rounded-xl bg-bgl-alt text-accent-ink/55 grid place-items-center shrink-0">
+                <Folder size={16} />
+              </span>
+              <div>
+                <p className="text-[13px] font-medium text-accent-ink">
+                  Start a new chart
+                </p>
+                <p className="text-[11.5px] text-accent-ink/55 leading-[1.45]">
+                  Group every page from one patient&apos;s chart together. Pick
+                  an existing patient, type their MRN, or just start — we&apos;ll
+                  match identity after extraction.
+                </p>
+              </div>
+            </div>
+
+            {pickedPatient ? (
+              <div className="flex items-center gap-2 rounded-md border border-accent-emerald/30 bg-card-mint px-3 py-2 mb-3">
+                <UserPlus size={13} className="text-accent-emerald" />
+                <span className="flex-1 text-[12.5px] text-accent-ink truncate">
+                  {pickedPatient.fullName}
+                  {pickedPatient.identifiers[0] ? (
+                    <span className="text-[11px] text-accent-ink/55 ml-1.5">
+                      · {pickedPatient.identifiers[0].value}
+                    </span>
+                  ) : null}
+                </span>
+                <button
+                  onClick={() => setPickedPatient(null)}
+                  className="text-[11px] text-accent-ink/55 hover:text-accent-ink"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2 mb-3">
+                <input
+                  type="text"
+                  value={patientSearch}
+                  onChange={(e) => setPatientSearch(e.target.value)}
+                  placeholder="Search existing patient by name or MRN…"
+                  className="w-full rounded-lg border border-black/[0.1] px-3 py-2 text-[13px] focus:outline-none focus:border-accent-emerald"
+                />
+                {patientHits.length > 0 ? (
+                  <ul className="rounded-lg border border-black/[0.08] divide-y divide-black/[0.05] bg-white max-h-40 overflow-y-auto">
+                    {patientHits.map((h) => (
+                      <li key={h.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPickedPatient(h);
+                            setPatientHits([]);
+                            setPatientSearch("");
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-bgl-alt"
+                        >
+                          <p className="text-[13px] font-medium text-accent-ink">
+                            {h.fullName}
+                          </p>
+                          <p className="text-[11px] text-accent-ink/55">
+                            {h.identifiers
+                              .map((i) => i.value)
+                              .filter(Boolean)
+                              .join(" · ") || "no identifiers on file"}
+                          </p>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            )}
+
+            <div className="grid sm:grid-cols-2 gap-2 mb-3">
+              <input
+                type="text"
+                value={chartMrn}
+                onChange={(e) => setChartMrn(e.target.value)}
+                placeholder="Or type MRN if patient is new"
+                disabled={!!pickedPatient}
+                className="w-full rounded-lg border border-black/[0.1] px-3 py-2 text-[13px] focus:outline-none focus:border-accent-emerald disabled:opacity-50"
+              />
+              <input
+                type="text"
+                value={chartLabel}
+                onChange={(e) => setChartLabel(e.target.value)}
+                placeholder="Optional internal label"
+                className="w-full rounded-lg border border-black/[0.1] px-3 py-2 text-[13px] focus:outline-none focus:border-accent-emerald"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={startChart}
+              disabled={isPending}
+              className="inline-flex items-center gap-2 text-[12px] font-medium px-4 py-2 rounded-full bg-accent-ink text-white hover:opacity-95 disabled:opacity-50"
+            >
+              <Folder size={13} />
+              {isPending ? "Starting…" : "Start chart"}
+            </button>
+          </div>
+        )}
 
         {/* Capture trigger card */}
         <div className="rounded-2xl border border-black/[0.08] p-6 mb-6">
