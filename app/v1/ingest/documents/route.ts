@@ -77,18 +77,15 @@ export async function POST(req: Request) {
   const actor = await resolveIngestActor(req);
   if (!actor) return unauthorized();
 
-  let organizationId: string;
-  if (actor.kind === "staff") {
-    organizationId = body.organizationId ?? actor.organizationId;
-    if (organizationId !== actor.organizationId) {
-      return forbidden("ORG_SCOPE_MISMATCH");
-    }
-  } else {
-    if (!body.organizationId) {
-      return validationError({ organizationId: "REQUIRED" });
-    }
-    organizationId = body.organizationId;
+  // Always-explicit organization scoping (see /v1/uploads/sign for the
+  // history): jobs used to silently target the staff user's org, which
+  // pushed customer-org captures into the platform org. Now every
+  // ingest request has to name the target org and pass the
+  // assertOrgAllowed check below.
+  if (!body.organizationId) {
+    return validationError({ organizationId: "REQUIRED" });
   }
+  const organizationId = body.organizationId;
 
   if (!(await assertOrgAllowed(actor, organizationId))) {
     return forbidden("ORG_NOT_LINKED");

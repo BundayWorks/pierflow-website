@@ -15,8 +15,15 @@ import {
   AlertCircle,
   Trash2,
   Plus,
+  Building2,
+  ChevronDown,
 } from "lucide-react";
-import { createBatch, deleteJob, getBatchForCapture } from "./actions";
+import {
+  createBatch,
+  deleteJob,
+  getBatchForCapture,
+  listRecentBatches,
+} from "./actions";
 
 /* ── Domain types ────────────────────────────────────────────── */
 
@@ -41,6 +48,14 @@ const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
   { value: "DISCHARGE_SUMMARY", label: "Discharge summary" },
 ];
 
+type CaptureOrg = {
+  id: string;
+  name: string;
+  type: string;
+  location: string;
+  requestedByPartner: { id: string; name: string } | null;
+};
+
 type RecentBatch = {
   id: string;
   label: string | null;
@@ -51,9 +66,7 @@ type RecentBatch = {
 
 type QueueItem = {
   id: string;
-  /** Only present for items captured in this session. */
   file?: File;
-  /** Local object URL for fresh captures, Cloudinary URL for resumed jobs. */
   previewUrl: string;
   documentType: DocumentType;
   status:
@@ -66,9 +79,10 @@ type QueueItem = {
   cloudinaryPublicId?: string;
   jobId?: string;
   errorMessage?: string;
-  /** Server-side job id (when hydrated from DB on resume). */
   fromServer?: boolean;
 };
+
+const ORG_SELECTION_KEY = "pf:capture:orgId";
 
 /* ── Sign + upload ───────────────────────────────────────────── */
 
@@ -82,11 +96,14 @@ type SignResponse = {
   maxBytes: number;
 };
 
-async function fetchSignature(batchId: string): Promise<SignResponse> {
+async function fetchSignature(
+  organizationId: string,
+  batchId: string,
+): Promise<SignResponse> {
   const res = await fetch("/v1/uploads/sign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ batchId }),
+    body: JSON.stringify({ organizationId, batchId }),
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
@@ -106,6 +123,7 @@ type CloudinaryUploadResult = {
 };
 
 async function registerIngest(input: {
+  organizationId: string;
   batchId: string;
   source: CloudinaryUploadResult;
   filename?: string;
@@ -115,6 +133,7 @@ async function registerIngest(input: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      organizationId: input.organizationId,
       batchId: input.batchId,
       filename: input.filename,
       documentType: input.documentType,
@@ -174,17 +193,70 @@ function uploadToCloudinary(
 
 /* ── Component ───────────────────────────────────────────────── */
 
-export default function CaptureClient({
-  recentBatches,
-}: {
-  recentBatches: RecentBatch[];
-}) {
+export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [orgPickerOpen, setOrgPickerOpen] = useState(false);
+  const [recentBatches, setRecentBatches] = useState<RecentBatch[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [batchLabel, setBatchLabel] = useState("");
   const [defaultDocType, setDefaultDocType] = useState<DocumentType>("AUTO");
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [isPending, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Hydrate the previously-selected org from localStorage so an
+  // operator who reloads the page keeps their context. Validate against
+  // the server-supplied org list so a deleted/deactivated org doesn't
+  // get auto-selected.
+  useEffect(() => {
+    if (orgs.length === 0) return;
+    let chosen: string | null = null;
+    try {
+      const saved = localStorage.getItem(ORG_SELECTION_KEY);
+      if (saved && orgs.some((o) => o.id === saved)) chosen = saved;
+    } catch {}
+    setActiveOrgId(chosen ?? orgs[0].id);
+  }, [orgs]);
+
+  const activeOrg = useMemo(
+    () => orgs.find((o) => o.id === activeOrgId) ?? null,
+    [orgs, activeOrgId],
+  );
+
+  // Refresh the recent-batches list every time we switch org.
+  useEffect(() => {
+    if (!activeOrgId) {
+      setRecentBatches([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const rows = await listRecentBatches(activeOrgId);
+      if (cancelled) return;
+      setRecentBatches(
+        rows.map((r) => ({
+          id: r.id,
+          label: r.label,
+          createdAt: r.createdAt.toISOString(),
+          priority: r.priority,
+          pageCount: r._count.jobs,
+        })),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrgId]);
+
+  function selectOrg(orgId: string) {
+    setActiveOrgId(orgId);
+    setOrgPickerOpen(false);
+    setActiveBatchId(null);
+    setQueue([]);
+    try {
+      localStorage.setItem(ORG_SELECTION_KEY, orgId);
+    } catch {}
+  }
 
   const activeBatch = useMemo(
     () => recentBatches.find((b) => b.id === activeBatchId) ?? null,
@@ -215,8 +287,6 @@ export default function CaptureClient({
           fromServer: true,
         };
       });
-      // Merge: keep any in-flight session items, prepend server items it
-      // doesn't already have.
       setQueue((q) => {
         const seenJobIds = new Set(q.map((x) => x.jobId).filter(Boolean));
         const fresh = hydrated.filter((h) => !seenJobIds.has(h.jobId));
@@ -234,41 +304,20 @@ export default function CaptureClient({
     (q) => q.status === "uploading" || q.status === "registering",
   ).length;
 
-  const startBatch = () =>
+  const startBatch = () => {
+    if (!activeOrgId) return;
     startTransition(async () => {
       const { batchId } = await createBatch({
+        organizationId: activeOrgId,
         label: batchLabel.trim() || undefined,
       });
       setActiveBatchId(batchId);
     });
-
-  const addFiles = useCallback(
-    (files: FileList | null) => {
-      if (!files?.length || !activeBatchId) return;
-
-      const newItems: QueueItem[] = Array.from(files).map((file) => ({
-        id: crypto.randomUUID(),
-        file,
-        previewUrl: URL.createObjectURL(file),
-        documentType: defaultDocType,
-        status: "pending",
-        progress: 0,
-      }));
-
-      setQueue((q) => [...newItems.reverse(), ...q]);
-
-      // Kick off uploads (best-effort, fully parallel — Cloudinary handles
-      // concurrency well, and the user's phone won't have many in-flight).
-      newItems.forEach((item) => {
-        void uploadOne(item);
-      });
-    },
-    [activeBatchId, defaultDocType],
-  );
+  };
 
   const uploadOne = useCallback(
     async (item: QueueItem) => {
-      if (!activeBatchId || !item.file) return;
+      if (!activeOrgId || !activeBatchId || !item.file) return;
       const file = item.file;
 
       setQueue((q) =>
@@ -278,15 +327,13 @@ export default function CaptureClient({
       );
 
       try {
-        const sig = await fetchSignature(activeBatchId);
+        const sig = await fetchSignature(activeOrgId, activeBatchId);
         const out = await uploadToCloudinary(file, sig, (pct) => {
           setQueue((q) =>
             q.map((x) => (x.id === item.id ? { ...x, progress: pct } : x)),
           );
         });
 
-        // Cloudinary is happy — now register the asset with Pierflow so
-        // the queue survives a page refresh.
         setQueue((q) =>
           q.map((x) =>
             x.id === item.id
@@ -301,6 +348,7 @@ export default function CaptureClient({
         );
 
         const reg = await registerIngest({
+          organizationId: activeOrgId,
           batchId: activeBatchId,
           source: out,
           filename: file.name,
@@ -325,7 +373,29 @@ export default function CaptureClient({
         );
       }
     },
-    [activeBatchId],
+    [activeOrgId, activeBatchId],
+  );
+
+  const addFiles = useCallback(
+    (files: FileList | null) => {
+      if (!files?.length || !activeBatchId) return;
+
+      const newItems: QueueItem[] = Array.from(files).map((file) => ({
+        id: crypto.randomUUID(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+        documentType: defaultDocType,
+        status: "pending",
+        progress: 0,
+      }));
+
+      setQueue((q) => [...newItems.reverse(), ...q]);
+
+      newItems.forEach((item) => {
+        void uploadOne(item);
+      });
+    },
+    [activeBatchId, defaultDocType, uploadOne],
   );
 
   const retry = (item: QueueItem) => void uploadOne(item);
@@ -340,10 +410,6 @@ export default function CaptureClient({
       return q.filter((x) => x.id !== id);
     });
 
-    // If the item was already registered with the server (has a jobId,
-    // either freshly assigned or hydrated from the DB), tear it down
-    // there too. Failure rolls the optimistic removal back so the
-    // operator can retry.
     if (dropped?.jobId) {
       try {
         await deleteJob(dropped.jobId);
@@ -361,226 +427,308 @@ export default function CaptureClient({
 
   /* ── Render ─────────────────────────────────────────────────── */
 
-  // Step 1: pick or create a batch
-  if (!activeBatchId) {
-    return (
-      <div className="mt-10 max-w-[640px]">
-        <div className="rounded-2xl border border-black/[0.08] p-6">
-          <h2 className="font-display text-[20px] text-accent-ink font-medium">
-            Start a capture batch
-          </h2>
-          <p className="mt-2 text-[14px] text-accent-ink/65">
-            A batch groups a set of pages from one operator session — e.g.
-            &quot;Ward A — June&quot;. You can resume an existing batch below.
-          </p>
-          <div className="mt-5 space-y-3">
-            <label className="block text-[12px] font-medium text-accent-ink/65">
-              Batch label (optional)
-            </label>
-            <input
-              type="text"
-              value={batchLabel}
-              onChange={(e) => setBatchLabel(e.target.value)}
-              placeholder="e.g. Ward A — June"
-              className="w-full rounded-lg border border-black/[0.1] px-3 py-2.5 text-[14px] focus:outline-none focus:border-accent-emerald"
-              maxLength={120}
-            />
-            <button
-              type="button"
-              onClick={startBatch}
-              disabled={isPending}
-              className="inline-flex items-center gap-2 text-[14px] font-medium px-4 py-2.5 rounded-full bg-accent-ink text-white hover:opacity-95 disabled:opacity-50"
-            >
-              <Plus size={14} />
-              {isPending ? "Creating…" : "Start new batch"}
-            </button>
-          </div>
-        </div>
-
-        {recentBatches.length > 0 && (
-          <div className="mt-8">
-            <p className="text-[12px] uppercase tracking-[0.16em] text-accent-ink/55 font-medium mb-3">
-              Recent batches
+  // Whatever step we're on, the org picker is always the top thing.
+  const OrgPicker = (
+    <div className="mt-10">
+      <div className="rounded-2xl border border-black/[0.08] p-4">
+        <button
+          type="button"
+          onClick={() => setOrgPickerOpen((v) => !v)}
+          className="w-full flex items-center gap-3 text-left"
+        >
+          <span className="w-9 h-9 rounded-xl bg-accent-teal-light text-accent-emerald grid place-items-center shrink-0">
+            <Building2 size={16} />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-accent-ink/55 font-medium">
+              Capturing for
             </p>
-            <ul className="space-y-2">
-              {recentBatches.map((b) => (
-                <li key={b.id}>
+            <p className="mt-0.5 text-[14px] font-medium text-accent-ink truncate">
+              {activeOrg?.name ?? "—"}
+            </p>
+            {activeOrg ? (
+              <p className="text-[12px] text-accent-ink/55 truncate">
+                {activeOrg.type.replace(/_/g, " ").toLowerCase()}
+                {activeOrg.location ? ` · ${activeOrg.location}` : ""}
+                {activeOrg.requestedByPartner
+                  ? ` · for ${activeOrg.requestedByPartner.name}`
+                  : ""}
+              </p>
+            ) : null}
+          </div>
+          <ChevronDown
+            size={16}
+            className={`text-accent-ink/45 transition-transform ${orgPickerOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {orgPickerOpen ? (
+          <ul className="mt-4 -mx-1 max-h-[280px] overflow-y-auto">
+            {orgs.map((o) => {
+              const selected = o.id === activeOrgId;
+              return (
+                <li key={o.id}>
                   <button
                     type="button"
-                    onClick={() => setActiveBatchId(b.id)}
-                    className="w-full text-left rounded-xl border border-black/[0.08] p-4 hover:border-black/25 transition-colors flex items-center justify-between gap-4"
+                    onClick={() => selectOrg(o.id)}
+                    className={`w-full text-left rounded-lg px-3 py-2.5 hover:bg-black/[0.03] flex items-start gap-3 ${
+                      selected ? "bg-bgl-alt" : ""
+                    }`}
                   >
-                    <div>
-                      <p className="text-[14px] font-medium text-accent-ink">
-                        {b.label ?? "Untitled batch"}
+                    <span className="w-2 h-2 rounded-full bg-accent-emerald mt-2 shrink-0 opacity-0 group-data-[selected]:opacity-100" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-medium text-accent-ink truncate">
+                        {o.name}
                       </p>
-                      <p className="text-[12px] text-accent-ink/55 mt-0.5">
-                        {new Date(b.createdAt).toLocaleString()} ·{" "}
-                        {b.pageCount} page{b.pageCount === 1 ? "" : "s"}
+                      <p className="text-[11px] text-accent-ink/55 truncate">
+                        {o.type.replace(/_/g, " ").toLowerCase()}
+                        {o.location ? ` · ${o.location}` : ""}
+                        {o.requestedByPartner
+                          ? ` · for ${o.requestedByPartner.name}`
+                          : ""}
                       </p>
                     </div>
-                    <span className="text-[12px] text-accent-emerald">
-                      Resume →
-                    </span>
+                    {selected ? (
+                      <CheckCircle2
+                        size={14}
+                        className="text-accent-emerald mt-0.5 shrink-0"
+                      />
+                    ) : null}
                   </button>
                 </li>
-              ))}
-            </ul>
+              );
+            })}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  // Step 1: pick or create a batch (within the selected org)
+  if (!activeBatchId) {
+    return (
+      <div>
+        {OrgPicker}
+        <div className="mt-8 max-w-[640px]">
+          <div className="rounded-2xl border border-black/[0.08] p-6">
+            <h2 className="font-display text-[20px] text-accent-ink font-medium">
+              Start a capture batch
+            </h2>
+            <p className="mt-2 text-[14px] text-accent-ink/65">
+              A batch groups a set of pages from one operator session — e.g.
+              &quot;Ward A — June&quot;. You can resume an existing batch below.
+            </p>
+            <div className="mt-5 space-y-3">
+              <label className="block text-[12px] font-medium text-accent-ink/65">
+                Batch label (optional)
+              </label>
+              <input
+                type="text"
+                value={batchLabel}
+                onChange={(e) => setBatchLabel(e.target.value)}
+                placeholder="e.g. Ward A — June"
+                className="w-full rounded-lg border border-black/[0.1] px-3 py-2.5 text-[14px] focus:outline-none focus:border-accent-emerald"
+                maxLength={120}
+              />
+              <button
+                type="button"
+                onClick={startBatch}
+                disabled={isPending || !activeOrgId}
+                className="inline-flex items-center gap-2 text-[14px] font-medium px-4 py-2.5 rounded-full bg-accent-ink text-white hover:opacity-95 disabled:opacity-50"
+              >
+                <Plus size={14} />
+                {isPending ? "Creating…" : "Start new batch"}
+              </button>
+            </div>
           </div>
-        )}
+
+          {recentBatches.length > 0 && (
+            <div className="mt-8">
+              <p className="text-[12px] uppercase tracking-[0.16em] text-accent-ink/55 font-medium mb-3">
+                Recent batches for {activeOrg?.name}
+              </p>
+              <ul className="space-y-2">
+                {recentBatches.map((b) => (
+                  <li key={b.id}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveBatchId(b.id)}
+                      className="w-full text-left rounded-xl border border-black/[0.08] p-4 hover:border-black/25 transition-colors flex items-center justify-between gap-4"
+                    >
+                      <div>
+                        <p className="text-[14px] font-medium text-accent-ink">
+                          {b.label ?? "Untitled batch"}
+                        </p>
+                        <p className="text-[12px] text-accent-ink/55 mt-0.5">
+                          {new Date(b.createdAt).toLocaleString()} ·{" "}
+                          {b.pageCount} page{b.pageCount === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <span className="text-[12px] text-accent-emerald">
+                        Resume →
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
 
   // Step 2: capture loop
   return (
-    <div className="mt-10">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div>
-          <p className="text-[12px] uppercase tracking-[0.16em] text-accent-emerald">
-            Active batch
-          </p>
-          <h2 className="mt-1 font-display text-[20px] text-accent-ink font-medium">
-            {activeBatch?.label ?? batchLabel.trim() ?? "Untitled batch"}
-          </h2>
-        </div>
-        <button
-          type="button"
-          onClick={() => setActiveBatchId(null)}
-          className="text-[13px] text-accent-ink/55 hover:text-accent-ink"
-        >
-          ← Change batch
-        </button>
-      </div>
-
-      {/* Capture trigger card */}
-      <div className="rounded-2xl border border-black/[0.08] p-6 mb-6">
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-[12px] font-medium text-accent-ink/65 mb-1.5">
-              Document type for next captures
-            </label>
-            <select
-              value={defaultDocType}
-              onChange={(e) =>
-                setDefaultDocType(e.target.value as DocumentType)
-              }
-              className="w-full rounded-lg border border-black/[0.1] px-3 py-2.5 text-[14px] bg-white focus:outline-none focus:border-accent-emerald"
-            >
-              {DOCUMENT_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+    <div>
+      {OrgPicker}
+      <div className="mt-8">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+          <div>
+            <p className="text-[12px] uppercase tracking-[0.16em] text-accent-emerald">
+              Active batch
+            </p>
+            <h2 className="mt-1 font-display text-[20px] text-accent-ink font-medium">
+              {activeBatch?.label ?? batchLabel.trim() ?? "Untitled batch"}
+            </h2>
           </div>
           <button
             type="button"
-            onClick={() => fileInput.current?.click()}
-            className="inline-flex items-center gap-2 text-[14px] font-medium px-5 py-3 rounded-full bg-accent-ink text-white hover:opacity-95"
+            onClick={() => setActiveBatchId(null)}
+            className="text-[13px] text-accent-ink/55 hover:text-accent-ink"
           >
-            <Camera size={16} />
-            Capture page
+            ← Change batch
           </button>
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              addFiles(e.target.files);
-              // Reset so capturing the same file twice still fires onChange.
-              e.target.value = "";
-            }}
-          />
         </div>
-      </div>
 
-      {/* Counters */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        <Stat label="Uploaded" value={uploadedCount} tone="ok" />
-        <Stat label="In flight" value={inflightCount} tone="active" />
-        <Stat label="Failed" value={failedCount} tone="warn" />
-      </div>
-
-      {/* Queue */}
-      {queue.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-black/[0.12] p-10 text-center text-accent-ink/55 text-[14px]">
-          No pages captured yet. Tap <strong>Capture page</strong> to begin.
-        </div>
-      ) : (
-        <ul className="space-y-3">
-          {queue.map((item) => (
-            <li
-              key={item.id}
-              className="rounded-xl border border-black/[0.08] p-3 flex items-center gap-4"
+        {/* Capture trigger card */}
+        <div className="rounded-2xl border border-black/[0.08] p-6 mb-6">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-[12px] font-medium text-accent-ink/65 mb-1.5">
+                Document type for next captures
+              </label>
+              <select
+                value={defaultDocType}
+                onChange={(e) =>
+                  setDefaultDocType(e.target.value as DocumentType)
+                }
+                className="w-full rounded-lg border border-black/[0.1] px-3 py-2.5 text-[14px] bg-white focus:outline-none focus:border-accent-emerald"
+              >
+                {DOCUMENT_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              className="inline-flex items-center gap-2 text-[14px] font-medium px-5 py-3 rounded-full bg-accent-ink text-white hover:opacity-95"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={item.previewUrl}
-                alt="capture preview"
-                className="w-16 h-16 rounded-md object-cover bg-bgl-alt shrink-0"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={item.status} />
-                  <p className="text-[13px] text-accent-ink truncate">
-                    {item.documentType === "AUTO"
-                      ? "Auto-classified"
-                      : DOCUMENT_TYPES.find(
-                          (t) => t.value === item.documentType,
-                        )?.label}
-                  </p>
-                </div>
-                {item.status === "uploading" && (
-                  <div className="mt-2 h-1.5 rounded-full bg-black/[0.06] overflow-hidden">
-                    <div
-                      className="h-full bg-accent-emerald transition-[width]"
-                      style={{ width: `${item.progress}%` }}
-                    />
+              <Camera size={16} />
+              Capture page
+            </button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Counters */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <Stat label="Uploaded" value={uploadedCount} tone="ok" />
+          <Stat label="In flight" value={inflightCount} tone="active" />
+          <Stat label="Failed" value={failedCount} tone="warn" />
+        </div>
+
+        {/* Queue */}
+        {queue.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-black/[0.12] p-10 text-center text-accent-ink/55 text-[14px]">
+            No pages captured yet. Tap <strong>Capture page</strong> to begin.
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {queue.map((item) => (
+              <li
+                key={item.id}
+                className="rounded-xl border border-black/[0.08] p-3 flex items-center gap-4"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={item.previewUrl}
+                  alt="capture preview"
+                  className="w-16 h-16 rounded-md object-cover bg-bgl-alt shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <StatusBadge status={item.status} />
+                    <p className="text-[13px] text-accent-ink truncate">
+                      {item.documentType === "AUTO"
+                        ? "Auto-classified"
+                        : DOCUMENT_TYPES.find(
+                            (t) => t.value === item.documentType,
+                          )?.label}
+                    </p>
                   </div>
-                )}
-                {item.status === "failed" && item.errorMessage && (
-                  <p className="mt-1 text-[12px] text-[#a83232]">
-                    {item.errorMessage}
-                  </p>
-                )}
-                {item.status === "uploaded" && item.cloudinaryPublicId && (
-                  <p className="mt-1 text-[11px] font-mono text-accent-ink/45 truncate">
-                    {item.cloudinaryPublicId}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {item.status === "failed" && (
+                  {item.status === "uploading" && (
+                    <div className="mt-2 h-1.5 rounded-full bg-black/[0.06] overflow-hidden">
+                      <div
+                        className="h-full bg-accent-emerald transition-[width]"
+                        style={{ width: `${item.progress}%` }}
+                      />
+                    </div>
+                  )}
+                  {item.status === "failed" && item.errorMessage && (
+                    <p className="mt-1 text-[12px] text-[#a83232]">
+                      {item.errorMessage}
+                    </p>
+                  )}
+                  {item.status === "uploaded" && item.cloudinaryPublicId && (
+                    <p className="mt-1 text-[11px] font-mono text-accent-ink/45 truncate">
+                      {item.cloudinaryPublicId}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {item.status === "failed" && (
+                    <button
+                      type="button"
+                      onClick={() => retry(item)}
+                      className="text-[12px] text-accent-emerald hover:underline"
+                    >
+                      Retry
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => retry(item)}
-                    className="text-[12px] text-accent-emerald hover:underline"
+                    onClick={() => void remove(item.id)}
+                    disabled={
+                      item.status === "uploading" ||
+                      item.status === "registering"
+                    }
+                    className="text-accent-ink/40 hover:text-accent-ink disabled:opacity-30 disabled:cursor-not-allowed"
+                    aria-label="Remove"
+                    title="Remove from batch"
                   >
-                    Retry
+                    <Trash2 size={14} />
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => void remove(item.id)}
-                  disabled={
-                    item.status === "uploading" ||
-                    item.status === "registering"
-                  }
-                  className="text-accent-ink/40 hover:text-accent-ink disabled:opacity-30 disabled:cursor-not-allowed"
-                  aria-label="Remove"
-                  title="Remove from batch"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

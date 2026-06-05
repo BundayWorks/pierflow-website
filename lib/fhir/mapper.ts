@@ -234,7 +234,18 @@ export type ExtractedJson = {
 export function buildFhirBundle(input: {
   data: ExtractedJson;
   documentType: DocumentType;
-  organization: { id: string; name: string };
+  organization: {
+    id: string;
+    name: string;
+    /**
+     * Optional MRN system URI for this org (e.g.
+     * "https://healthos.ng/mrn/"). When set, primary patient
+     * identifiers extracted as MRN are namespaced under this URI
+     * instead of the Pierflow default. Partners use this to keep
+     * their internal identifier system intact end-to-end.
+     */
+    mrnSystem?: string | null;
+  };
   /** Stable Pierflow patient id, if we've matched to an existing one. */
   matchedPatientId?: string;
 }): FhirBundle {
@@ -254,7 +265,11 @@ export function buildFhirBundle(input: {
 
   // Patient
   const patientId = input.matchedPatientId ?? `pat_${randomId()}`;
-  const patient = buildPatient(patientId, input.data);
+  const patient = buildPatient(
+    patientId,
+    input.data,
+    input.organization.mrnSystem ?? null,
+  );
   if (patient) {
     entries.push({ fullUrl: `Patient/${patientId}`, resource: patient });
   }
@@ -438,14 +453,21 @@ export function buildFhirBundle(input: {
 
 /* ── Per-resource builders ──────────────────────────────────────── */
 
-function buildPatient(id: string, data: ExtractedJson): FhirPatient | null {
+function buildPatient(
+  id: string,
+  data: ExtractedJson,
+  orgMrnSystem: string | null,
+): FhirPatient | null {
   const p = data.patient;
   if (!p) return null;
 
   const identifiers: { system?: string; value: string }[] = [];
   if (p.mrn?.value) {
     identifiers.push({
-      system: "https://pierflow.com/mrn",
+      // Prefer the org's own MRN system URI when configured — that's
+      // how partner-supplied identifiers stay consistent with their
+      // internal records system. Falls back to the Pierflow default.
+      system: orgMrnSystem ?? "https://pierflow.com/mrn",
       value: p.mrn.value,
     });
   }

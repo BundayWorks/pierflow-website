@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { listReviewQueue } from "./actions";
-import { AlertTriangle, ArrowRight, FileText } from "lucide-react";
+import { listReviewQueue, listReviewTargetOrgs } from "./actions";
+import { AlertTriangle, ArrowRight, FileText, Building2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -20,27 +20,59 @@ const DOC_LABELS: Record<string, string> = {
   OTHER: "Other",
 };
 
-export default async function ReviewQueuePage() {
-  const queue = await listReviewQueue();
+export default async function ReviewQueuePage({
+  searchParams,
+}: {
+  searchParams?: { orgId?: string };
+}) {
+  const orgs = await listReviewTargetOrgs();
+
+  if (orgs.length === 0) {
+    return (
+      <ReviewShell>
+        <div className="mt-10 rounded-2xl border border-dashed border-black/[0.12] p-10 text-center">
+          <p className="text-[14px] text-accent-ink/55">
+            No active customer organizations yet.
+          </p>
+          <p className="mt-2 text-[12px] text-accent-ink/55 leading-[1.6] max-w-[420px] mx-auto">
+            Review is scoped to the customer organization records belong to.
+            Approve a pending organization request in the{" "}
+            <Link
+              href="/portal/customer-orgs"
+              className="text-accent-emerald hover:underline"
+            >
+              customer orgs inbox
+            </Link>
+            , then come back here.
+          </p>
+        </div>
+      </ReviewShell>
+    );
+  }
+
+  // Resolve which org we're showing the queue for. Default to the one
+  // with the largest awaiting-review count so the operator opens the
+  // page on the busiest queue.
+  const requested = searchParams?.orgId;
+  const matched = requested ? orgs.find((o) => o.id === requested) : null;
+  const activeOrg =
+    matched ??
+    orgs.slice().sort(
+      (a, b) =>
+        b._count.processingJobs - a._count.processingJobs,
+    )[0];
+
+  const queue = await listReviewQueue(activeOrg.id);
 
   return (
-    <div>
-      <p className="text-[12px] uppercase tracking-[0.16em] text-accent-emerald">
-        Review
-      </p>
-      <h1 className="mt-2 font-display text-[32px] md:text-[40px] leading-[1.05] tracking-[-0.02em] text-accent-ink font-medium">
-        Review queue
-      </h1>
-      <p className="mt-3 text-[15px] leading-[1.7] text-accent-ink/65 max-w-[640px]">
-        Records the platform extracted but couldn&apos;t auto-approve. Open
-        each one to check the original page, correct anything wrong, and
-        approve it into the next Import Package.
-      </p>
+    <ReviewShell>
+      <OrgPicker orgs={orgs} activeOrgId={activeOrg.id} />
 
       {queue.length === 0 ? (
         <div className="mt-10 rounded-2xl border border-dashed border-black/[0.12] p-10 text-center">
           <p className="text-[14px] text-accent-ink/55">
-            Nothing awaiting review right now. Captured records that pass
+            Nothing awaiting review for{" "}
+            <strong>{activeOrg.name}</strong>. Captured records that pass
             confidence checks land straight in Validated.
           </p>
           <Link
@@ -121,6 +153,78 @@ export default async function ReviewQueuePage() {
           })}
         </ul>
       )}
+    </ReviewShell>
+  );
+}
+
+function ReviewShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-[12px] uppercase tracking-[0.16em] text-accent-emerald">
+        Review
+      </p>
+      <h1 className="mt-2 font-display text-[32px] md:text-[40px] leading-[1.05] tracking-[-0.02em] text-accent-ink font-medium">
+        Review queue
+      </h1>
+      <p className="mt-3 text-[15px] leading-[1.7] text-accent-ink/65 max-w-[640px]">
+        Records the platform extracted but couldn&apos;t auto-approve. Open
+        each one to check the original page, correct anything wrong, and
+        approve it into the next Import Package.
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function OrgPicker({
+  orgs,
+  activeOrgId,
+}: {
+  orgs: {
+    id: string;
+    name: string;
+    type: string;
+    country: string | null;
+    state: string | null;
+    lga: string | null;
+    requestedByPartner: { id: string; name: string } | null;
+    _count: { processingJobs: number };
+  }[];
+  activeOrgId: string;
+}) {
+  return (
+    <div className="mt-8">
+      <p className="text-[11px] uppercase tracking-[0.14em] text-accent-ink/55 font-medium mb-3">
+        Customer organization
+      </p>
+      <ul className="flex flex-wrap gap-2">
+        {orgs.map((o) => {
+          const active = o.id === activeOrgId;
+          const count = o._count.processingJobs;
+          return (
+            <li key={o.id}>
+              <Link
+                href={`/portal/review?orgId=${o.id}`}
+                className={`inline-flex items-center gap-2 text-[12px] px-3 py-1.5 rounded-full transition-colors ${
+                  active
+                    ? "bg-accent-ink text-white"
+                    : "border border-black/[0.1] text-accent-ink/75 hover:text-accent-ink hover:border-black/25"
+                }`}
+              >
+                <Building2 size={12} />
+                {o.name}
+                <span
+                  className={`text-[10px] font-mono ${
+                    active ? "text-white/75" : "text-accent-ink/45"
+                  }`}
+                >
+                  {count}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

@@ -68,25 +68,32 @@ export async function resolveIngestActor(
 
 /**
  * Returns true if the actor is allowed to read/write the given org id.
- * Staff can act on their own org; partners on any org they have an
- * ACTIVE PartnerOrganizationLink for AND that's accessStatus = ACTIVE.
+ *
+ * Staff (any Pierflow employee) can act on any ACTIVE customer org —
+ * they may be doing capture-as-a-service on behalf of a partner.
+ * When non-admin capture-operator roles land, this is where we'll
+ * scope by OrgMember.
+ *
+ * Partners can act on any org they have an ACTIVE
+ * PartnerOrganizationLink for AND that's accessStatus = ACTIVE.
  */
 export async function assertOrgAllowed(
   actor: IngestActor,
   organizationId: string,
 ): Promise<boolean> {
-  if (actor.kind === "staff") {
-    return organizationId === actor.organizationId;
-  }
-  if (!actor.organizationIds.has(organizationId)) return false;
-  // Belt-and-suspenders: ensure the org is currently ACTIVE. A linked
-  // org that's PENDING / REJECTED / SUSPENDED is not ingestable.
   const org = await db.organization.findUnique({
     where: { id: organizationId },
     select: { accessStatus: true, isActive: true },
   });
   if (!org || !org.isActive) return false;
-  return org.accessStatus === "ACTIVE";
+  if (org.accessStatus !== "ACTIVE") return false;
+
+  if (actor.kind === "staff") {
+    // TODO: scope by OrgMember role once non-admin capture operators
+    // exist. For now any Pierflow staff can act on any ACTIVE org.
+    return true;
+  }
+  return actor.organizationIds.has(organizationId);
 }
 
 /* ── Error envelopes ─────────────────────────────────────────── */

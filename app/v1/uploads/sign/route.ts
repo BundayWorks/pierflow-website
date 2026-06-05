@@ -44,21 +44,14 @@ export async function POST(req: Request) {
   const actor = await resolveIngestActor(req);
   if (!actor) return unauthorized();
 
-  // Resolve the target org. Staff act on their own org by default;
-  // partners must pass organizationId explicitly.
-  let organizationId: string;
-  if (actor.kind === "staff") {
-    organizationId = body.organizationId ?? actor.organizationId;
-    if (organizationId !== actor.organizationId) {
-      // Staff are scoped to their own org — refuse cross-tenant reach.
-      return forbidden("ORG_SCOPE_MISMATCH");
-    }
-  } else {
-    if (!body.organizationId) {
-      return validationError({ organizationId: "REQUIRED" });
-    }
-    organizationId = body.organizationId;
+  // Both staff and partners must pass organizationId. Staff used to
+  // implicitly target their own (Pierflow Platform) org — that's how
+  // jobs ended up under the platform org instead of the customer org
+  // they were captured for. Always explicit now.
+  if (!body.organizationId) {
+    return validationError({ organizationId: "REQUIRED" });
   }
+  const organizationId = body.organizationId;
 
   if (!(await assertOrgAllowed(actor, organizationId))) {
     return forbidden("ORG_NOT_LINKED");

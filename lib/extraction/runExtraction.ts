@@ -33,7 +33,7 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
       sourceAsset: true,
       recordTypeHint: true,
       pageCount: true,
-      organization: { select: { id: true, name: true } },
+      organization: { select: { id: true, name: true, mrnSystem: true } },
     },
   });
   if (!job) return;
@@ -64,6 +64,7 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
       organization: {
         id: job.organization?.id ?? job.organizationId,
         name: job.organization?.name ?? "Unknown organization",
+        mrnSystem: job.organization?.mrnSystem ?? null,
       },
     });
 

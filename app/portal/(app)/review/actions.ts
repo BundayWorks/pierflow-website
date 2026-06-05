@@ -7,15 +7,57 @@ import { requireSessionContext } from "@/lib/auth";
 import { buildFhirBundle, type ExtractedJson } from "@/lib/fhir/mapper";
 import { validateExtraction } from "@/lib/validate/rules";
 
+/**
+ * Review surface, scoped by customer organization.
+ *
+ * Like /portal/capture, the review queue now targets one customer org
+ * at a time. Staff pick the org via a URL parameter (?orgId=…) handled
+ * by the page; every action below requires the orgId so we don't silently
+ * leak across tenants. assertStaffMayReviewFor mirrors the capture-side
+ * gate.
+ */
+
+async function assertStaffMayReviewFor(orgId: string) {
+  await requireSessionContext();
+  const org = await db.organization.findUnique({
+    where: { id: orgId },
+    select: { id: true, name: true, accessStatus: true, isActive: true, mrnSystem: true },
+  });
+  if (!org || !org.isActive) throw new Error("ORG_NOT_FOUND");
+  if (org.accessStatus !== "ACTIVE") throw new Error("ORG_NOT_ACTIVE");
+  return org;
+}
+
+/* ── Org picker ────────────────────────────────────────────── */
+
+export async function listReviewTargetOrgs() {
+  await requireSessionContext();
+  return db.organization.findMany({
+    where: { accessStatus: "ACTIVE", isActive: true },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      country: true,
+      state: true,
+      lga: true,
+      requestedByPartner: { select: { id: true, name: true } },
+      _count: {
+        select: {
+          processingJobs: { where: { status: "AWAITING_REVIEW" } },
+        },
+      },
+    },
+  });
+}
+
 /* ── Queue ────────────────────────────────────────────────────── */
 
-export async function listReviewQueue() {
-  const ctx = await requireSessionContext();
+export async function listReviewQueue(organizationId: string) {
+  await assertStaffMayReviewFor(organizationId);
   return db.processingJob.findMany({
-    where: {
-      organizationId: ctx.organization.id,
-      status: "AWAITING_REVIEW",
-    },
+    where: { organizationId, status: "AWAITING_REVIEW" },
     orderBy: [
       { priority: "desc" }, // URGENT first
       { createdAt: "asc" }, // FIFO within priority
@@ -45,18 +87,19 @@ export async function listReviewQueue() {
 /* ── Detail ───────────────────────────────────────────────────── */
 
 export async function getReviewJob(jobId: string) {
-  const ctx = await requireSessionContext();
-  return db.processingJob.findFirst({
-    where: { id: jobId, organizationId: ctx.organization.id },
+  await requireSessionContext();
+  const job = await db.processingJob.findUnique({
+    where: { id: jobId },
     select: {
       id: true,
       createdAt: true,
       priority: true,
       status: true,
+      organizationId: true,
       recordTypeHint: true,
       sourceAsset: true,
       sourceFilename: true,
-      organization: { select: { id: true, name: true } },
+      organization: { select: { id: true, name: true, mrnSystem: true } },
       batch: { select: { id: true, label: true } },
       extractedRecords: {
         take: 1,
@@ -74,6 +117,9 @@ export async function getReviewJob(jobId: string) {
       },
     },
   });
+  if (!job) return null;
+  await assertStaffMayReviewFor(job.organizationId);
+  return job;
 }
 
 /* ── Approve / reject / save ──────────────────────────────────── */
@@ -85,25 +131,23 @@ const ApproveInput = z.object({
   reviewerNotes: z.string().max(2000).optional(),
 });
 
-/**
- * Apply edits and approve the record. Rebuilds the FHIR bundle from the
- * edited data and revalidates so the disposition reflects human work.
- */
 export async function approveRecord(input: z.infer<typeof ApproveInput>) {
   const ctx = await requireSessionContext();
   const parsed = ApproveInput.parse(input);
 
-  const record = await db.extractedRecord.findFirst({
-    where: { id: parsed.recordId, organizationId: ctx.organization.id },
+  const record = await db.extractedRecord.findUnique({
+    where: { id: parsed.recordId },
     select: {
       id: true,
       jobId: true,
+      organizationId: true,
       documentType: true,
       avgConfidence: true,
-      organization: { select: { id: true, name: true } },
+      organization: { select: { id: true, name: true, mrnSystem: true } },
     },
   });
   if (!record) throw new Error("RECORD_NOT_FOUND");
+  await assertStaffMayReviewFor(record.organizationId);
 
   const data = parsed.data as ExtractedJson;
 
@@ -111,13 +155,12 @@ export async function approveRecord(input: z.infer<typeof ApproveInput>) {
     data,
     documentType: record.documentType,
     organization: {
-      id: record.organization?.id ?? ctx.organization.id,
-      name: record.organization?.name ?? ctx.organization.name,
+      id: record.organization?.id ?? record.organizationId,
+      name: record.organization?.name ?? "Unknown organization",
+      mrnSystem: record.organization?.mrnSystem ?? null,
     },
   });
 
-  // Re-run validation against the edited data. A reviewer can decide to
-  // approve even with WARN-level issues; we record the latest state.
   const validation = validateExtraction({
     data,
     // After human edit the original model confidence is no longer
@@ -165,11 +208,12 @@ export async function saveDraft(input: z.infer<typeof SaveDraftInput>) {
   const ctx = await requireSessionContext();
   const parsed = SaveDraftInput.parse(input);
 
-  const record = await db.extractedRecord.findFirst({
-    where: { id: parsed.recordId, organizationId: ctx.organization.id },
-    select: { id: true },
+  const record = await db.extractedRecord.findUnique({
+    where: { id: parsed.recordId },
+    select: { id: true, organizationId: true },
   });
   if (!record) throw new Error("RECORD_NOT_FOUND");
+  await assertStaffMayReviewFor(record.organizationId);
 
   await db.extractedRecord.update({
     where: { id: record.id },
@@ -191,11 +235,12 @@ export async function rejectRecord(input: z.infer<typeof RejectInput>) {
   const ctx = await requireSessionContext();
   const parsed = RejectInput.parse(input);
 
-  const record = await db.extractedRecord.findFirst({
-    where: { id: parsed.recordId, organizationId: ctx.organization.id },
-    select: { id: true, jobId: true },
+  const record = await db.extractedRecord.findUnique({
+    where: { id: parsed.recordId },
+    select: { id: true, jobId: true, organizationId: true },
   });
   if (!record) throw new Error("RECORD_NOT_FOUND");
+  await assertStaffMayReviewFor(record.organizationId);
 
   await db.$transaction([
     db.extractedRecord.update({
