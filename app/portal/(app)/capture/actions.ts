@@ -350,7 +350,7 @@ export async function listBatchChartFolders(batchId: string) {
   });
   if (!batch) return [];
   await assertStaffMayCaptureFor(batch.organizationId);
-  return db.chartFolder.findMany({
+  const folders = await db.chartFolder.findMany({
     where: { batchId },
     orderBy: { createdAt: "desc" },
     select: {
@@ -365,7 +365,41 @@ export async function listBatchChartFolders(batchId: string) {
       resolvedSource: true,
       resolvedConfidence: true,
       resolvedPatient: { select: { id: true, fullName: true } },
+      jobs: { select: { status: true } },
     },
+  });
+
+  // Project a friendly "what's the chart's actual state?" enum the UI
+  // can render without re-deriving it from individual job statuses.
+  return folders.map((f) => {
+    const jobs = f.jobs;
+    const anyExtracting = jobs.some(
+      (j) => j.status === "QUEUED" || j.status === "PROCESSING",
+    );
+    const anyFailed = jobs.some((j) => j.status === "FAILED");
+    const isOpen = !f.closedAt;
+    let displayStatus:
+      | "OPEN"
+      | "EXTRACTING"
+      | "RESOLVED"
+      | "UNRESOLVED_NO_EVIDENCE"
+      | "FAILED_NO_RESOLUTION" = "OPEN";
+    if (isOpen) {
+      displayStatus = "OPEN";
+    } else if (f.resolvedSource !== "UNRESOLVED") {
+      displayStatus = "RESOLVED";
+    } else if (anyExtracting) {
+      displayStatus = "EXTRACTING";
+    } else if (anyFailed && f.resolvedSource === "UNRESOLVED") {
+      displayStatus = "FAILED_NO_RESOLUTION";
+    } else {
+      displayStatus = "UNRESOLVED_NO_EVIDENCE";
+    }
+    return {
+      ...f,
+      jobs: undefined,
+      displayStatus,
+    };
   });
 }
 

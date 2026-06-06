@@ -88,6 +88,20 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
         ? "VALIDATED"
         : "AWAITING_REVIEW";
 
+    // If this job belongs to a chart folder whose identity was
+    // resolved early (e.g. operator declared a patient and closed the
+    // chart before extraction finished), inherit the patient now so
+    // late-arriving records don't sit orphaned waiting for someone to
+    // re-run resolution.
+    let inheritedPatientId: string | null = null;
+    if (job.chartFolderId) {
+      const folder = await db.chartFolder.findUnique({
+        where: { id: job.chartFolderId },
+        select: { resolvedPatientId: true },
+      });
+      inheritedPatientId = folder?.resolvedPatientId ?? null;
+    }
+
     // Persist the record and advance the job in one round-trip.
     await db.$transaction([
       db.extractedRecord.create({
@@ -95,6 +109,7 @@ export async function runExtractionForJob(jobId: string): Promise<void> {
           jobId: job.id,
           organizationId: job.organizationId,
           documentType: job.recordTypeHint,
+          patientId: inheritedPatientId,
           pageNumbers: Array.from({ length: job.pageCount }, (_, i) => i + 1),
           extractedJson: result.data as object,
           fhirBundle: fhir as unknown as object,

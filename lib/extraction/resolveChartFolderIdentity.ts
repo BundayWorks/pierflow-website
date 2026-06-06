@@ -74,9 +74,17 @@ export async function resolveChartFolderIdentity(
   if (!folder) return null;
 
   const records = folder.jobs.flatMap((j) => j.extractedRecords);
-  if (records.length === 0) {
-    // Nothing extracted yet — caller should try again after extraction
-    // completes for at least one job in the folder.
+
+  // If the operator declared a patient OR an MRN, we can resolve
+  // immediately — we don't need any extracted evidence to know who
+  // this chart belongs to. Records that haven't extracted yet will get
+  // their patientId set the moment they do, via applyResolution writing
+  // resolvedPatientId on the folder (extraction transactions copy from
+  // the folder when present).
+  if (records.length === 0 && !folder.declaredPatientId && !folder.declaredMrn) {
+    // No extracted evidence AND no operator declaration — there's
+    // nothing for us to match against. The caller will try again when
+    // extraction lands.
     return null;
   }
 

@@ -30,6 +30,7 @@ import {
   startChartFolder,
   closeChartFolder,
   reopenChartFolder,
+  resolveChartFolderNow,
   listBatchChartFolders,
   searchPatientsForChart,
 } from "./actions";
@@ -901,13 +902,7 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
                   c.declaredPatient?.fullName ??
                   c.label ??
                   (c.declaredMrn ? `MRN ${c.declaredMrn}` : "Unnamed chart");
-                const status = !c.closedAt
-                  ? "Open"
-                  : c.resolvedSource === "UNRESOLVED"
-                    ? "Closed — resolving…"
-                    : `Resolved · ${c.resolvedSource
-                        .replace(/_/g, " ")
-                        .toLowerCase()}`;
+                const status = describeChartStatus(c);
                 return (
                   <li
                     key={c.id}
@@ -925,6 +920,30 @@ export default function CaptureClient({ orgs }: { orgs: CaptureOrg[] }) {
                         {status}
                       </p>
                     </div>
+                    {c.displayStatus === "FAILED_NO_RESOLUTION" ||
+                    c.displayStatus === "UNRESOLVED_NO_EVIDENCE" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          startTransition(async () => {
+                            try {
+                              await resolveChartFolderNow(c.id);
+                              await refreshBatchCharts();
+                            } catch (err) {
+                              window.alert(
+                                err instanceof Error
+                                  ? err.message
+                                  : "Couldn't resolve.",
+                              );
+                            }
+                          });
+                        }}
+                        disabled={isPending}
+                        className="text-[11px] text-accent-emerald hover:underline inline-flex items-center gap-1 shrink-0 disabled:opacity-50"
+                      >
+                        Resolve now
+                      </button>
+                    ) : null}
                     {c.closedAt ? (
                       <button
                         type="button"
@@ -1152,4 +1171,34 @@ function StatusBadge({ status }: { status: QueueItem["status"] }) {
       Queued
     </span>
   );
+}
+
+function describeChartStatus(c: {
+  displayStatus?:
+    | "OPEN"
+    | "EXTRACTING"
+    | "RESOLVED"
+    | "UNRESOLVED_NO_EVIDENCE"
+    | "FAILED_NO_RESOLUTION";
+  closedAt: Date | null;
+  resolvedSource: string;
+  resolvedPatient: { fullName: string } | null;
+}): string {
+  switch (c.displayStatus) {
+    case "OPEN":
+      return "Open";
+    case "EXTRACTING":
+      return "Closed — extracting";
+    case "RESOLVED":
+      return `Resolved · ${c.resolvedSource.replace(/_/g, " ").toLowerCase()}`;
+    case "UNRESOLVED_NO_EVIDENCE":
+      return "Closed — no usable evidence yet";
+    case "FAILED_NO_RESOLUTION":
+      return "Closed — extraction failed";
+  }
+  // Defensive fallback for legacy rows missing displayStatus.
+  if (!c.closedAt) return "Open";
+  return c.resolvedSource === "UNRESOLVED"
+    ? "Closed"
+    : `Resolved · ${c.resolvedSource.replace(/_/g, " ").toLowerCase()}`;
 }
