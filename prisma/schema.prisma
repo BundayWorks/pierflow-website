@@ -95,6 +95,7 @@ model Organization {
   approvalEvents      OrganizationApprovalEvent[]
   chartFolders        ChartFolder[]
   mergeCandidates     PatientMergeCandidate[]
+  partnerPatientLinks PartnerPatientLink[]
   requestedByPartner  Partner?         @relation("OrgsRequestedByPartner", fields: [requestedByPartnerId], references: [id])
 
   @@index([type])
@@ -243,6 +244,7 @@ model Partner {
 
   apiKeys             PartnerApiKey[]
   organizationLinks   PartnerOrganizationLink[]
+  patientLinks        PartnerPatientLink[]
   importPackages      ImportPackage[]
   webhookEndpoints    WebhookEndpoint[]
   users               PartnerUser[]
@@ -386,6 +388,61 @@ model PartnerOrganizationLink {
   @@map("partner_organization_links")
 }
 
+// How a PartnerPatientLink was created — useful for triage when a
+// reviewer is looking at a wrong-looking mapping.
+enum PartnerPatientLinkSource {
+  // Partner posted (mrn, external_id) and we found an existing Patient
+  AUTO_MRN
+  // Fuzzy-matched name + DOB at link-creation time
+  AUTO_FUZZY
+  // Partner directly registered the link via /v1/partner-patient-links
+  PARTNER_API
+  // Reviewer linked via the staff portal
+  REVIEWER
+  // Partner returned the external id on an import-package acknowledgement
+  IMPORT_ACK
+  // Created alongside a placeholder Patient when partner posted an
+  // unknown MRN
+  PLACEHOLDER_FROM_MRN
+}
+
+// Bidirectional mapping between Pierflow's Patient id and the
+// partner's EMR-side patient id. One row per (partner, our patient)
+// and one per (partner, their external id). An EMR vendor querying
+// the API with their own customer's patient id can resolve through
+// this table to a FHIR Bundle without maintaining their own mapping.
+model PartnerPatientLink {
+  id                  String                   @id @default(cuid())
+  partnerId           String
+  patientId           String
+  organizationId      String
+  // The EMR vendor's identifier for this patient
+  externalId          String
+  // Optional system URI partners can claim (e.g. https://healthos.ng/patients/).
+  // Surfaces in the FHIR Bundle as a third Identifier entry so the
+  // partner's EMR can round-trip the link without out-of-band state.
+  externalSystem      String?
+  source              PartnerPatientLinkSource
+  // Auto-match confidence (1.0 for direct partner-supplied links).
+  confidence          Float?                   @default(1.0)
+  linkedAt            DateTime                 @default(now())
+  linkedByExternalId  String?
+
+  partner        Partner       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  patient        Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // One mapping per (partner, our patient) — a partner shouldn't have
+  // two external ids for the same patient.
+  @@unique([partnerId, patientId])
+  // One mapping per (partner, their external id) — and the partner
+  // shouldn't have two of our patients claiming the same external id.
+  @@unique([partnerId, externalId])
+  @@index([patientId])
+  @@index([organizationId])
+  @@map("partner_patient_links")
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Patients
 // ─────────────────────────────────────────────────────────────────────
@@ -420,6 +477,7 @@ model Patient {
   resolvedCharts      ChartFolder[]       @relation("ChartFolderResolvedPatient")
   mergePrimaryOf      PatientMergeCandidate[] @relation("PatientMergeCandidatePrimary")
   mergeCandidateOf    PatientMergeCandidate[] @relation("PatientMergeCandidateCandidate")
+  partnerLinks        PartnerPatientLink[]
 
   @@index([organizationId])
   @@index([fullName])

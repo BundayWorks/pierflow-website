@@ -7,6 +7,7 @@ import {
   forbidden,
   notFound,
 } from "@/lib/partnerAuth";
+import { linkOneByPatientId } from "@/lib/partnerPatientLinks";
 
 /**
  * POST /v1/import-packages/:packageId/acknowledge
@@ -24,6 +25,28 @@ const Body = z.object({
   failure_reasons: z.record(z.string(), z.string()).optional(),
   imported_at: z.string().datetime().optional(),
   partner_import_reference: z.string().max(120).optional(),
+  /**
+   * Optional: pairs of (pierflow_patient_id, external_id) the
+   * partner's EMR created during import. We register each as a
+   * PartnerPatientLink so future API calls can target the patient
+   * by the partner's own id via the by-external FHIR shortcut.
+   */
+  patient_id_mappings: z
+    .array(
+      z.object({
+        pierflow_patient_id: z.string().min(1),
+        external_id: z.string().trim().min(1).max(200),
+        external_system: z
+          .string()
+          .trim()
+          .url()
+          .max(300)
+          .optional()
+          .or(z.literal("")),
+      }),
+    )
+    .max(2000)
+    .optional(),
 });
 
 export async function POST(
@@ -107,5 +130,41 @@ export async function POST(
     });
   });
 
-  return NextResponse.json({ status: "acknowledged", package_id: pkg.id });
+  // Patient-id mappings — registered outside the main transaction so a
+  // single bad pair doesn't roll back the acknowledgement. Per-item
+  // outcomes go back in the response so the partner can retry only
+  // the failures.
+  const mappingResults: {
+    pierflow_patient_id: string;
+    external_id: string;
+    ok: boolean;
+    reason?: string;
+  }[] = [];
+  if (body.patient_id_mappings && body.patient_id_mappings.length > 0) {
+    for (const m of body.patient_id_mappings) {
+      const r = await linkOneByPatientId({
+        partnerId: pkg.partnerId,
+        organizationId: pkg.organizationId,
+        patientId: m.pierflow_patient_id,
+        externalId: m.external_id,
+        externalSystem:
+          m.external_system && m.external_system.length > 0
+            ? m.external_system
+            : null,
+        source: "IMPORT_ACK",
+      });
+      mappingResults.push({
+        pierflow_patient_id: m.pierflow_patient_id,
+        external_id: m.external_id,
+        ok: r.ok,
+        reason: r.ok ? undefined : r.reason,
+      });
+    }
+  }
+
+  return NextResponse.json({
+    status: "acknowledged",
+    package_id: pkg.id,
+    patient_id_mappings: mappingResults,
+  });
 }

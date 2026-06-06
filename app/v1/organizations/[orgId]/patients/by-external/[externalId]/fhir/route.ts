@@ -6,28 +6,35 @@ import {
   notFound,
 } from "@/lib/partnerAuth";
 import { buildPatientBundle } from "@/lib/fhir/patientBundle";
+import { resolvePartnerExternalId } from "@/lib/partnerPatientLinks";
 
 /**
- * GET /v1/organizations/:orgId/patients/:patientId/fhir
+ * GET /v1/organizations/:orgId/patients/by-external/:externalId/fhir
  *
- * Assembles a single FHIR R4 Bundle for a patient by merging every
- * approved ExtractedRecord. If a PartnerPatientLink exists between
- * the calling partner and this patient, the partner's external id is
- * included as a third Patient Identifier so the EMR can round-trip
- * without out-of-band state.
+ * EMR-vendor convenience: the partner hits Pierflow with *their own*
+ * patient id (e.g. the row id in their EMR) and gets back the merged
+ * FHIR Bundle without ever caring about Pierflow's internal patient
+ * id. The mapping is resolved through PartnerPatientLink.
  *
- * Query params:
- *   include    — comma-separated resource types to include (default: all)
+ * Same query params as the direct patient-id route:
+ *   include    — comma-separated resource types to include
  *   date_from  — YYYY-MM-DD filter on Encounter.period.start
  *   date_to    — YYYY-MM-DD filter on Encounter.period.start
  */
 export async function GET(
   req: Request,
-  { params }: { params: { orgId: string; patientId: string } },
+  { params }: { params: { orgId: string; externalId: string } },
 ) {
   const session = await resolvePartnerSession(req);
   if (!session) return unauthorized();
   if (!session.organizationIds.has(params.orgId)) return forbidden();
+
+  const link = await resolvePartnerExternalId({
+    partnerId: session.partnerId,
+    organizationId: params.orgId,
+    externalId: decodeURIComponent(params.externalId),
+  });
+  if (!link) return notFound("LINK_NOT_FOUND");
 
   const url = new URL(req.url);
   const includeParam = url.searchParams.get("include");
@@ -44,7 +51,7 @@ export async function GET(
 
   const bundle = await buildPatientBundle({
     organizationId: params.orgId,
-    patientId: params.patientId,
+    patientId: link.patientId,
     options: {
       include,
       dateFrom,
