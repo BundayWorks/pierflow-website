@@ -1,7 +1,10 @@
 import {
   DocPageHeader,
   H2,
+  H3,
   Body,
+  Code,
+  Callout,
   KVTable,
   PrevNext,
 } from "@/components/docs/primitives";
@@ -13,81 +16,280 @@ export default function Page() {
     <article>
       <DocPageHeader
         eyebrow="API"
-        title="Endpoints & webhooks"
-        description="A complete index of API endpoints and the platform events that mirror them."
+        title="Records API endpoints"
+        description="Every /v1 endpoint partners can call, with auth notes and example request shapes. Reach for the Postman collection (downloadable from your /portal/overview) for runnable versions."
       />
 
-      <H2 id="endpoints">REST endpoints</H2>
+      <Callout kind="info">
+        Every request needs{" "}
+        <code>Authorization: Bearer pf_test_sk_… (or pf_live_sk_…)</code>.
+        Issue keys from <code>/portal/keys</code>. Keys are server-side only —
+        never embed them in mobile or browser code.
+      </Callout>
+
+      <H2 id="organizations">Organizations</H2>
       <Body>
-        Connectivity (insurance distribution, claims, verification, providers)
-        and Records API (paper-to-digital ingestion and partner import).
+        Each request acts on a customer organization your key is linked to via
+        a <code>PartnerOrganizationLink</code>. Use these to list and inspect
+        the orgs available to you.
       </Body>
       <KVTable
-        headers={["Resource", "Endpoint"]}
+        headers={["Method · Path", "Purpose"]}
         rows={[
-          ["Plans", "/v1/plans"],
-          ["Quotes", "/v1/quotes"],
-          ["Enrollments", "/v1/enrollments"],
-          ["Policies", "/v1/policies/:id"],
-          ["Claims", "/v1/claims"],
-          ["Verifications", "/v1/verifications"],
-          ["Providers", "/v1/providers"],
-          ["Webhooks", "/v1/webhooks/endpoints"],
-          ["Settlement", "/v1/settlements"],
+          ["GET /v1/organizations", "List orgs this key may act on"],
+          [
+            "GET /v1/organizations/:orgId",
+            "One organization, including mrnSystem",
+          ],
+        ]}
+      />
+      <Code language="HTTP" filename="GET /v1/organizations">
+{`curl -H "Authorization: Bearer $PIERFLOW_KEY" \\
+  https://www.pierflow.com/v1/organizations`}
+      </Code>
+
+      <H2 id="ingest">Capture and ingest</H2>
+      <Body>
+        Use these to push paper records through extraction. Image bytes go
+        direct to Cloudinary using a signed URL — Pierflow never proxies files.
+      </Body>
+      <KVTable
+        headers={["Method · Path", "Purpose"]}
+        rows={[
+          [
+            "POST /v1/uploads/sign",
+            "Get a one-shot Cloudinary upload signature",
+          ],
+          [
+            "POST /v1/scan-batches",
+            "Create a batch (groups pages from one session)",
+          ],
+          [
+            "POST /v1/ingest/documents",
+            "Register an uploaded asset as a ProcessingJob",
+          ],
+          [
+            "GET /v1/ingest/jobs/:jobId",
+            "Poll ProcessingJob state + extracted records",
+          ],
         ]}
       />
 
-      <H2 id="records-endpoints">Records API endpoints</H2>
-      <Body>
-        See the{" "}
+      <H3 id="ingest-flow">Typical ingest flow</H3>
+      <Code language="bash" filename="curl">
+{`# 1. Create a batch
+curl -X POST https://www.pierflow.com/v1/scan-batches \\
+  -H "Authorization: Bearer $PIERFLOW_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "organizationId": "org_lagoon_hospital",
+    "label": "Ward A migration · cohort 1",
+    "priority": "NORMAL"
+  }'
+
+# 2. Sign a Cloudinary upload
+curl -X POST https://www.pierflow.com/v1/uploads/sign \\
+  -H "Authorization: Bearer $PIERFLOW_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "organizationId": "org_lagoon_hospital",
+    "batchId": "bat_3xMA…"
+  }'
+
+# 3. Upload directly to Cloudinary
+# (multipart-form upload using the fields returned in step 2)
+
+# 4. Tell Pierflow about the asset
+curl -X POST https://www.pierflow.com/v1/ingest/documents \\
+  -H "Authorization: Bearer $PIERFLOW_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "organizationId": "org_lagoon_hospital",
+    "batchId": "bat_3xMA…",
+    "source": {
+      "publicId": "pierflow/org_…/page_001",
+      "secureUrl": "https://res.cloudinary.com/…/page_001.png"
+    },
+    "documentType": "OUTPATIENT_CARD"
+  }'
+
+# 5. Poll
+curl https://www.pierflow.com/v1/ingest/jobs/job_4HD… \\
+  -H "Authorization: Bearer $PIERFLOW_KEY"`}
+      </Code>
+
+      <Callout kind="info">
+        <strong>Chart folders.</strong> If you&apos;re photographing multi-page
+        charts, group pages by passing the same <code>chartFolderId</code> on
+        every <code>/v1/ingest/documents</code> call for that chart. Identity
+        is resolved at folder level — see{" "}
         <a
-          href="/docs/records/overview"
+          href="/docs/patient-mapping"
           className="text-accent-emerald underline"
         >
-          Records API
-        </a>{" "}
-        section for full request and response shapes.
-      </Body>
-      <KVTable
-        headers={["Resource", "Endpoint"]}
-        rows={[
-          ["Ingest documents", "POST /v1/ingest/documents"],
-          ["Job status", "GET /v1/jobs/:id"],
-          ["Organizations", "GET /v1/organizations"],
-          ["One organization", "GET /v1/organizations/:id"],
-          ["Patients", "GET /v1/organizations/:id/patients"],
-          ["Patient FHIR bundle", "GET /v1/organizations/:id/patients/:patient_id/fhir"],
-          ["Import packages", "GET /v1/organizations/:id/import-packages"],
-          ["Download package", "GET /v1/import-packages/:package_id/download"],
-          ["Acknowledge package", "POST /v1/import-packages/:package_id/acknowledge"],
-        ]}
-      />
+          Patient mapping
+        </a>
+        .
+      </Callout>
 
-      <H2 id="webhooks">Webhook events</H2>
+      <H2 id="patients">Patients</H2>
       <Body>
-        Every consequential state change emits an event. Subscribe to the ones
-        you care about — full catalogue on the{" "}
-        <a href="/docs/webhooks" className="text-accent-emerald underline">
-          Webhooks
-        </a>{" "}
-        page.
+        After extraction, validated records roll up into a per-patient FHIR
+        Bundle.
       </Body>
       <KVTable
-        headers={["Event", "When it fires"]}
+        headers={["Method · Path", "Purpose"]}
         rows={[
-          ["member.created", "A new member record was created"],
-          ["policy.issued", "A policy was confirmed and is active"],
-          ["policy.renewed", "Renewal premium was collected"],
-          ["policy.lapsed", "Premium collection failed after the grace window"],
-          ["policy.cancelled", "Policy was terminated"],
-          ["premium.paid", "A premium was successfully collected"],
-          ["premium.failed", "A premium collection attempt failed"],
-          ["claim.submitted", "A claim was received"],
-          ["claim.approved", "A claim was approved by the HMO"],
-          ["claim.rejected", "A claim was rejected by the HMO"],
-          ["commission.credited", "A commission entry was posted to your ledger"],
+          [
+            "GET /v1/organizations/:orgId/patients",
+            "List patients for an org",
+          ],
+          [
+            "GET /v1/organizations/:orgId/patients/:patientId/fhir",
+            "Merged FHIR R4 Bundle",
+          ],
+          [
+            "GET /v1/organizations/:orgId/patients/by-external/:externalId/fhir",
+            "Bundle by your own EMR id (via PartnerPatientLink)",
+          ],
         ]}
       />
+      <Body>
+        Both FHIR endpoints accept the same query params: <code>include</code>{" "}
+        (comma-separated resource types), <code>date_from</code>,{" "}
+        <code>date_to</code> (YYYY-MM-DD filters on Encounter.period.start).
+        When a PartnerPatientLink exists, the Patient.identifier array in the
+        response includes your <code>external_id</code> as a secondary
+        identifier so your EMR can round-trip without out-of-band state.
+      </Body>
+
+      <H2 id="partner-patient-links">Partner patient links</H2>
+      <Body>
+        Map Pierflow Patient ids to your EMR&apos;s patient ids in one place.
+        Cohort imports go through <code>/bulk</code>; per-patient mappings
+        from acknowledge calls flow in automatically (see Acknowledge). Once
+        linked, you can query Pierflow with your own id via the by-external
+        FHIR endpoint above.
+      </Body>
+      <KVTable
+        headers={["Method · Path", "Purpose"]}
+        rows={[
+          [
+            "POST /v1/partner-patient-links",
+            "Create or update one mapping (by MRN or patient id)",
+          ],
+          [
+            "POST /v1/partner-patient-links/bulk",
+            "Up to 500 mappings in one call",
+          ],
+          [
+            "GET /v1/partner-patient-links?external_id=…",
+            "Lookup by your id",
+          ],
+          [
+            "GET /v1/partner-patient-links?patient_id=…",
+            "Lookup by Pierflow id",
+          ],
+        ]}
+      />
+      <Code language="HTTP" filename="POST /v1/partner-patient-links (by MRN)">
+{`curl -X POST https://www.pierflow.com/v1/partner-patient-links \\
+  -H "Authorization: Bearer $PIERFLOW_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "kind": "by_mrn",
+    "organization_id": "org_lagoon_hospital",
+    "mrn": "LH-00143-26",
+    "external_id": "emr_patient_8821",
+    "external_system": "https://your-emr.example.com/patients/",
+    "placeholder_name": "Adaeze Margaret Nwosu"
+  }'`}
+      </Code>
+      <Body>
+        If no Patient exists under that MRN yet, we create a placeholder
+        Patient + identifier + link with source{" "}
+        <code>PLACEHOLDER_FROM_MRN</code>. Future extracted records carrying
+        that MRN auto-attach to the same Patient — the link survives the
+        switch.
+      </Body>
+
+      <H2 id="packages">Import packages</H2>
+      <Body>
+        Nightly ZIP of validated records per (partner, org) tuple. Download
+        once, acknowledge once.
+      </Body>
+      <KVTable
+        headers={["Method · Path", "Purpose"]}
+        rows={[
+          [
+            "GET /v1/organizations/:orgId/import-packages",
+            "List packages for an org (status, counts, expiresAt)",
+          ],
+          [
+            "GET /v1/import-packages/:packageId/download",
+            "Short-lived signed Cloudinary URL for the ZIP",
+          ],
+          [
+            "POST /v1/import-packages/:packageId/acknowledge",
+            "Confirm import + register patient_id_mappings",
+          ],
+        ]}
+      />
+      <Code
+        language="HTTP"
+        filename="POST /v1/import-packages/:packageId/acknowledge"
+      >
+{`curl -X POST https://www.pierflow.com/v1/import-packages/pkg_4HD…/acknowledge \\
+  -H "Authorization: Bearer $PIERFLOW_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "imported_patient_count": 47,
+    "failed_patient_ids": [],
+    "partner_import_reference": "emr-import-2026-06-06-001",
+    "patient_id_mappings": [
+      {
+        "pierflow_patient_id": "pat_b3f9c21a",
+        "external_id": "emr_8821",
+        "external_system": "https://your-emr.example.com/patients/"
+      }
+    ]
+  }'`}
+      </Code>
+      <Body>
+        <code>patient_id_mappings</code> is optional. When present, each pair
+        becomes a PartnerPatientLink with source <code>IMPORT_ACK</code>. Per-item
+        outcomes return in the response so you retry only the failures.
+      </Body>
+
+      <H2 id="webhooks">Webhooks</H2>
+      <Body>
+        Subscribe to events so you don&apos;t have to poll. Endpoints are
+        signed with HMAC-SHA256; verify <code>X-Pierflow-Signature</code>{" "}
+        before trusting any payload.
+      </Body>
+      <KVTable
+        headers={["Event", "Fired when"]}
+        rows={[
+          [
+            "processing_job.completed",
+            "Extraction finished — record is AUTO_APPROVED or AWAITING_REVIEW",
+          ],
+          [
+            "processing_job.failed",
+            "Extraction errored; ProcessingJob.status = FAILED",
+          ],
+          [
+            "import_package.ready",
+            "A new ImportPackage moved to READY",
+          ],
+          ["test.ping", "Sent on demand from /portal/webhooks"],
+        ]}
+      />
+      <Body>
+        Manage endpoints from your <code>/portal/webhooks</code> page.
+        Synchronous delivery with one retry after 30s today; persistent
+        delivery audit ships next.
+      </Body>
 
       <PrevNext prev={prev} next={next} />
     </article>

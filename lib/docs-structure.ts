@@ -342,6 +342,19 @@ export const DOCS_TREE: DocSection[] = [
         ],
       },
       {
+        title: "Patient mapping",
+        slug: "patient-mapping",
+        path: "patient-mapping",
+        summary:
+          "How Pierflow groups multi-page charts, detects duplicates, and maps Pierflow patient ids to your EMR's ids.",
+        anchors: [
+          { label: "Chart folders", hash: "chart-folders" },
+          { label: "Duplicate detection", hash: "duplicates" },
+          { label: "Partner patient links", hash: "partner-links" },
+          { label: "FHIR Bundle with your id", hash: "fhir-bundle" },
+        ],
+      },
+      {
         title: "Import packages",
         slug: "records-packages",
         path: "records/packages",

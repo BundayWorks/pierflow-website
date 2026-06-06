@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Pierflow Records API",
-    "description": "End-to-end smoke test for the Pierflow partner-facing Records API.\n\nWalks through the full lifecycle: create a scan batch, sign a Cloudinary upload, register the asset as an ingest job, poll until the job validates, then list patients and download an Import Package.\n\n## Setup\n1. Open this collection's Variables tab.\n2. Set `base_url` (default `https://www.pierflow.com`).\n3. Set `api_key` (issue one from `/portal/keys` in your partner portal).\n4. Set `organization_id` to an org you're linked to (see `/portal/organizations`).\n5. Set `sample_image_url` to a publicly reachable image URL — the default points at our hosted mock outpatient card.\n\nThen run the requests in order, or pick 'Run Collection' to fire them top to bottom. Each request's test script auto-populates the next variable (`batch_id`, `job_id`, etc.) so you don't have to copy-paste between steps.\n\n## Auth\nEvery request sends `Authorization: Bearer {{api_key}}`. Keys never leave your server in production.",
+    "description": "End-to-end working set for the Pierflow partner-facing API.\n\n## What's in here\n  1–8 walk the records lifecycle: create a scan batch, upload via signed Cloudinary URL, register an ingest job, poll, list patients, download + acknowledge an import package.\n  9    PartnerPatientLink CRUD — register mappings between Pierflow's patient id and your EMR's id (single, bulk, lookup).\n  10   By-external FHIR shortcut — query Pierflow with **your own** patient id and get back the merged Bundle.\n\nRun the requests in order, or pick 'Run Collection' to fire them top to bottom. Each request's test script auto-populates the next variable (`batch_id`, `job_id`, `patient_id`, `external_id`, …) so you don't copy-paste between steps.\n\n## Setup\n1. Open this collection's Variables tab.\n2. Set `base_url` (default `https://www.pierflow.com`).\n3. Set `api_key` (issue one from `/portal/keys` in your partner portal).\n4. Set `organization_id` to an org you're linked to (see `/portal/organizations`).\n5. Set `sample_image_url` to a publicly reachable image URL — the default points at our hosted mock outpatient card.\n\n## Auth\nEvery request sends `Authorization: Bearer {{api_key}}`. Keys are server-side only — never embed them in mobile or browser code.\n\n## Patient identity\nPierflow's identity model is documented at https://www.pierflow.com/docs/patient-mapping — covers chart folders, duplicate detection, and the partner-link surface this collection exercises.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -77,6 +77,11 @@
     },
     {
       "key": "cloudinary_secure_url",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "external_id",
       "value": "",
       "type": "string"
     }
@@ -414,7 +419,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"imported_count\": 1,\n  \"failed_count\": 0,\n  \"failures\": []\n}"
+              "raw": "{\n  \"imported_patient_count\": 1,\n  \"failed_patient_ids\": [],\n  \"failure_reasons\": {},\n  \"partner_import_reference\": \"emr-import-{{$timestamp}}\",\n  \"patient_id_mappings\": [\n    {\n      \"pierflow_patient_id\": \"{{patient_id}}\",\n      \"external_id\": \"emr_patient_{{$randomInt}}\",\n      \"external_system\": \"https://your-emr.example.com/patients/\"\n    }\n  ]\n}"
             },
             "url": {
               "raw": "{{base_url}}/v1/import-packages/{{package_id}}/acknowledge",
@@ -425,8 +430,147 @@
                 "{{package_id}}",
                 "acknowledge"
               ]
+            },
+            "description": "Acknowledges receipt of an import package. Successfully imported records get marked IMPORTED and won't ship again. Failed patient ids stay packaged so the next cron picks them up.\n\n**patient_id_mappings (optional)** — pairs of (pierflow_patient_id, external_id) the partner's EMR created during import. Each becomes a PartnerPatientLink with source IMPORT_ACK so future API calls can target the patient via /v1/organizations/:orgId/patients/by-external/:externalId/fhir. Per-item results return in the response so partners retry only failures."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
             }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9 · Partner patient links",
+      "item": [
+        {
+          "name": "POST /v1/partner-patient-links (by MRN)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"by_mrn\",\n  \"organization_id\": \"{{organization_id}}\",\n  \"mrn\": \"LH-00143-26\",\n  \"external_id\": \"emr_patient_8821\",\n  \"external_system\": \"https://your-emr.example.com/patients/\",\n  \"placeholder_name\": \"Adaeze Margaret Nwosu\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/partner-patient-links",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "partner-patient-links"]
+            },
+            "description": "Register a mapping between the partner's external_id and a Pierflow Patient resolved via MRN. If no Patient has that MRN yet, we create a placeholder Patient + identifier + link so future extracted records auto-attach. `placeholder_name` is only used when we have to create that placeholder.\n\nIdempotent on (partner, patient) and (partner, external_id) — re-posting the same pair returns the existing link."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('patient_id', body.patient_id);",
+                  "pm.collectionVariables.set('external_id', body.external_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /v1/partner-patient-links (by patient id)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"by_patient_id\",\n  \"organization_id\": \"{{organization_id}}\",\n  \"patient_id\": \"{{patient_id}}\",\n  \"external_id\": \"emr_patient_8821\",\n  \"external_system\": \"https://your-emr.example.com/patients/\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/partner-patient-links",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "partner-patient-links"]
+            },
+            "description": "Direct link to an existing Pierflow Patient by its id. Use this after you've imported records and gotten back a Pierflow patient_id in a package manifest."
           }
+        },
+        {
+          "name": "POST /v1/partner-patient-links/bulk",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organization_id\": \"{{organization_id}}\",\n  \"external_system\": \"https://your-emr.example.com/patients/\",\n  \"items\": [\n    { \"kind\": \"by_mrn\", \"mrn\": \"LH-00143-26\", \"external_id\": \"emr_8821\" },\n    { \"kind\": \"by_mrn\", \"mrn\": \"LH-00200-26\", \"external_id\": \"emr_8822\", \"placeholder_name\": \"Tunde Adeleke\" },\n    { \"kind\": \"by_patient_id\", \"patient_id\": \"{{patient_id}}\", \"external_id\": \"emr_8823\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/partner-patient-links/bulk",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "partner-patient-links", "bulk"]
+            },
+            "description": "Cohort-import friendly: post up to 500 mapping items in one call. Mix `by_mrn` and `by_patient_id` flavours freely. Response includes per-item ok/reason so you retry only the failures."
+          }
+        },
+        {
+          "name": "GET /v1/partner-patient-links?external_id=…",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v1/partner-patient-links?external_id={{external_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "partner-patient-links"],
+              "query": [{ "key": "external_id", "value": "{{external_id}}" }]
+            },
+            "description": "Look up a link by either side. Accepts ?external_id=… or ?patient_id=…. Returns 404 if no link exists."
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 · FHIR by external id",
+      "item": [
+        {
+          "name": "GET /v1/organizations/:orgId/patients/by-external/:externalId/fhir",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/v1/organizations/{{organization_id}}/patients/by-external/{{external_id}}/fhir",
+              "host": ["{{base_url}}"],
+              "path": [
+                "v1",
+                "organizations",
+                "{{organization_id}}",
+                "patients",
+                "by-external",
+                "{{external_id}}",
+                "fhir"
+              ]
+            },
+            "description": "EMR-vendor convenience: query Pierflow with **your own** patient id and get back the merged FHIR Bundle. We resolve the PartnerPatientLink internally, so your EMR doesn't need to maintain a mapping table. Patient.identifier in the response includes your external id (use: secondary) so round-trips are self-describing."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Bundle has Patient.identifier with our external id', () => {",
+                  "  const patient = body.entry.find(e => e.resource.resourceType === 'Patient');",
+                  "  pm.expect(patient).to.exist;",
+                  "  const idents = patient.resource.identifier || [];",
+                  "  const externalSeen = idents.some(i => i.value === pm.collectionVariables.get('external_id'));",
+                  "  pm.expect(externalSeen).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
