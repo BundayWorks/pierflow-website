@@ -367,7 +367,6 @@ export function buildCoverage(
   enrollment: EnrollmentForFhir,
   patientRef: string,
   orgRef: string,
-  _country: CountryProfile,
 ): Coverage {
   return {
     resourceType: "Coverage",

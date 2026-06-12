@@ -96,12 +96,10 @@ export async function syncCoverageToMedplum(
   patientMedplumId: string,
   orgMedplumId: string,
 ): Promise<string | null> {
-  const country = await getCountryProfile();
   const resource = buildCoverage(
     enrollment,
     `Patient/${patientMedplumId}`,
     `Organization/${orgMedplumId}`,
-    country,
   );
   return upsertResource(
     resource,
