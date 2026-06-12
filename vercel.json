@@ -11,7 +11,7 @@
     },
     {
       "path": "/v1/cron/reap-stuck-jobs",
-      "schedule": "10 * * * *"
+      "schedule": "10 3 * * *"
     },
     {
       "path": "/v1/cron/reconcile-settlements",
@@ -19,7 +19,7 @@
     },
     {
       "path": "/v1/cron/poll-claims",
-      "schedule": "0 */4 * * *"
+      "schedule": "0 4 * * *"
     }
   ]
 }
