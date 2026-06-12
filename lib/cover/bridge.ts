@@ -34,8 +34,8 @@ const PIERFLOW = "https://pierflow.com/cover";
  * Create-if-none-exist or update. Uses the Pierflow system identifier
  * as the match key so we get idempotent upserts.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function upsertResource(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   resource: any,
   system: string,
   value: string,

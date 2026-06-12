@@ -11,7 +11,6 @@
  */
 
 import { db } from "@/lib/db";
-import { getMedplum } from "@/lib/medplum";
 import {
   syncOrganizationToMedplum,
   syncPatientToMedplum,

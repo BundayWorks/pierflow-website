@@ -140,8 +140,6 @@ export type OrgForFhir = {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────
 
-const KOBO_PER_NAIRA = BigInt(100);
-
 function koboToDecimal(kobo: bigint): string {
   const naira = Number(kobo) / 100;
   return naira.toFixed(2);
@@ -369,7 +367,7 @@ export function buildCoverage(
   enrollment: EnrollmentForFhir,
   patientRef: string,
   orgRef: string,
-  country: CountryProfile,
+  _country: CountryProfile,
 ): Coverage {
   return {
     resourceType: "Coverage",
