@@ -156,7 +156,7 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
         partnerId: partner.id,
         company: input.company,
       },
-      ignoreExisting: false,
+      ignoreExisting: true,
       notify: false,
     });
     // invitation.url is "https://<clerk-frontend>/v1/tickets/accept?ticket=…"
@@ -171,7 +171,14 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
       await db.partner.delete({ where: { id: partner.id } });
     } catch {}
     const message = err instanceof Error ? err.message : "Unknown Clerk error";
-    console.error("[signup] createInvitation failed:", message);
+    // Log full Clerk error details for debugging
+    const clerkErrors = (err as Record<string, unknown>)?.errors;
+    console.error("[signup] createInvitation failed:", message, {
+      status: (err as Record<string, unknown>)?.status,
+      errors: clerkErrors ? JSON.stringify(clerkErrors) : undefined,
+      redirectUrl: portalUrl(),
+      email,
+    });
     return { ok: false, reason: "CLERK_ERROR", message };
   }
 
