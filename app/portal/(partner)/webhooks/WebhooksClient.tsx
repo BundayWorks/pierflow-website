@@ -27,11 +27,83 @@ type Endpoint = {
   createdAt: string;
 };
 
-const ALL_EVENTS = [
-  { value: "processing_job.completed", label: "Job completed" },
-  { value: "processing_job.failed", label: "Job failed" },
-  { value: "import_package.ready", label: "Package ready" },
+/**
+ * Grouped by product surface. The values must match the
+ * WebhookEventName union in lib/webhooks.ts — anything else is
+ * silently ignored at delivery time.
+ *
+ * Subscribe to the wildcard `"*"` to receive every event, which is
+ * useful for sandbox testing without manually ticking every box.
+ */
+const EVENT_GROUPS: {
+  title: string;
+  description: string;
+  events: { value: string; label: string }[];
+}[] = [
+  {
+    title: "All events",
+    description:
+      "Catch-all subscription. Receives every event we fire, current and future.",
+    events: [{ value: "*", label: "Subscribe to everything" }],
+  },
+  {
+    title: "Records API",
+    description: "Fires when extraction or package delivery state changes.",
+    events: [
+      { value: "processing_job.completed", label: "Job completed" },
+      { value: "processing_job.failed", label: "Job failed" },
+      { value: "import_package.ready", label: "Package ready" },
+    ],
+  },
+  {
+    title: "Insurance — enrollment lifecycle",
+    description:
+      "Fires as members move through identity check, payment, and HMO activation.",
+    events: [
+      { value: "hmo_enrollment.created", label: "Created" },
+      {
+        value: "hmo_enrollment.identity_verified",
+        label: "Identity verified",
+      },
+      {
+        value: "hmo_enrollment.identity_rejected",
+        label: "Identity rejected",
+      },
+      { value: "hmo_enrollment.payment_received", label: "Payment received" },
+      {
+        value: "hmo_enrollment.submitted_to_hmo",
+        label: "Submitted to HMO",
+      },
+      { value: "hmo_enrollment.activated", label: "Activated" },
+      { value: "hmo_enrollment.hmo_rejected", label: "HMO rejected" },
+      { value: "hmo_enrollment.cancelled", label: "Cancelled" },
+      { value: "hmo_enrollment.failed", label: "Failed" },
+    ],
+  },
+  {
+    title: "Insurance — claims lifecycle",
+    description:
+      "Fires when a claim transitions state. Polled every 4h until terminal.",
+    events: [
+      { value: "hmo_claim.submitted", label: "Submitted" },
+      { value: "hmo_claim.under_review", label: "Under review" },
+      { value: "hmo_claim.approved", label: "Approved" },
+      { value: "hmo_claim.rejected", label: "Rejected" },
+      { value: "hmo_claim.paid", label: "Paid" },
+    ],
+  },
+  {
+    title: "Insurance — HMO network",
+    description:
+      "Fires when Pierflow renegotiates terms with an HMO you have opted into. Review the new rate and re-accept to apply it to future enrollments.",
+    events: [
+      { value: "hmo.rate_card.updated", label: "Rate card updated" },
+    ],
+  },
 ];
+
+/** Flat list of every checkable event value (for default selection). */
+const ALL_EVENTS = EVENT_GROUPS.flatMap((g) => g.events);
 
 export default function WebhooksClient({
   initialEndpoints,
@@ -45,7 +117,10 @@ export default function WebhooksClient({
   const [showForm, setShowForm] = useState(false);
   const [url, setUrl] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>(
-    ALL_EVENTS.map((e) => e.value),
+    // Default: subscribe to specific events but NOT the catch-all "*".
+    // Opting into "*" is an explicit choice — it forwards every future
+    // event we add without further consent.
+    ALL_EVENTS.filter((e) => e.value !== "*").map((e) => e.value),
   );
   const [error, setError] = useState<string | null>(null);
   const [createdSecret, setCreatedSecret] = useState<{
@@ -159,22 +234,34 @@ export default function WebhooksClient({
           </label>
           <div>
             <p className="text-[12px] text-accent-ink mb-2">Events to receive</p>
-            <div className="space-y-1.5">
-              {ALL_EVENTS.map((e) => (
-                <label
-                  key={e.value}
-                  className="flex items-center gap-2 text-[12px] text-accent-ink cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedEvents.includes(e.value)}
-                    onChange={() => toggleEvent(e.value)}
-                  />
-                  <code className="text-[12px] font-mono text-accent-ink">
-                    {e.value}
-                  </code>
-                  <span className="text-accent-ink/55">— {e.label}</span>
-                </label>
+            <div className="space-y-4">
+              {EVENT_GROUPS.map((group) => (
+                <div key={group.title}>
+                  <p className="text-[11px] font-medium text-accent-ink/75 uppercase tracking-[0.04em]">
+                    {group.title}
+                  </p>
+                  <p className="text-[11px] text-accent-ink/55 leading-[1.5] mt-0.5 mb-1.5">
+                    {group.description}
+                  </p>
+                  <div className="space-y-1">
+                    {group.events.map((e) => (
+                      <label
+                        key={e.value}
+                        className="flex items-center gap-2 text-[12px] text-accent-ink cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedEvents.includes(e.value)}
+                          onChange={() => toggleEvent(e.value)}
+                        />
+                        <code className="text-[12px] font-mono text-accent-ink">
+                          {e.value}
+                        </code>
+                        <span className="text-accent-ink/55">— {e.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>

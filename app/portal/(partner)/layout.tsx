@@ -13,6 +13,20 @@ export default async function PartnerLayout({
   if (session.kind === "unlinked") redirect("/portal/pending");
 
   return (
-    <PartnerShell partnerName={session.partner.name}>{children}</PartnerShell>
+    <PartnerShell
+      partnerName={session.partner.name}
+      partnerType={session.partner.type}
+      consumesProducts={session.partner.consumesProducts}
+      impersonation={
+        session.impersonatedByStaff
+          ? {
+              staffEmail: session.impersonatedByStaff.staffEmail,
+              startedAt: session.impersonatedByStaff.startedAt,
+            }
+          : null
+      }
+    >
+      {children}
+    </PartnerShell>
   );
 }

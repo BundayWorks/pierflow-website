@@ -12,6 +12,7 @@ const SignupSchema = z.object({
     "INSURER",
     "GOVERNMENT",
     "ANALYTICS",
+    "FINTECH",
     "OTHER",
   ]),
   primaryUseCase: z.string().trim().min(1).max(120),

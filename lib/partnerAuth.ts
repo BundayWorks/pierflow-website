@@ -23,7 +23,52 @@ export type PartnerSession = {
   /** Organization ids this key is permitted to act on. */
   organizationIds: Set<string>;
   apiKeyId: string;
+  /** Scopes granted to this key (e.g. "records:read", "insurance:read"). */
+  scopes: Set<string>;
 };
+
+/**
+ * Known scopes. The empty array on PartnerApiKey is treated as
+ * "legacy — all scopes granted" so we don't break existing keys
+ * issued before scope enforcement was wired in.
+ */
+export type Scope =
+  | "records:read"
+  | "records:write"
+  | "insurance:read"
+  | "insurance:write";
+
+export const ALL_SCOPES: Scope[] = [
+  "records:read",
+  "records:write",
+  "insurance:read",
+  "insurance:write",
+];
+
+/**
+ * Default API-key scopes a partner gets based on which products they
+ * consume. Shared between the partner-side self-issue flow and the
+ * staff-side initial-sandbox-key-issuance flow so both surfaces stay
+ * in sync.
+ *
+ * A partner that consumes both products gets the union. A partner
+ * with no products configured (legacy data) gets records:read so they
+ * are not silently locked out.
+ */
+export function defaultScopesFor(
+  consumes: ("RECORDS" | "INSURANCE")[],
+): Scope[] {
+  const scopes = new Set<Scope>();
+  if (consumes.includes("RECORDS")) {
+    scopes.add("records:read");
+  }
+  if (consumes.includes("INSURANCE")) {
+    scopes.add("insurance:read");
+    scopes.add("insurance:write");
+  }
+  if (scopes.size === 0) scopes.add("records:read");
+  return Array.from(scopes);
+}
 
 /** Format `pf_<env>_sk_<24-char-base64url>`. */
 export function generateApiKey(env: "test" | "live" = "test"): {
@@ -67,6 +112,7 @@ export async function resolvePartnerSession(
       id: true,
       revokedAt: true,
       expiresAt: true,
+      scopes: true,
       partner: {
         select: {
           id: true,
@@ -90,6 +136,14 @@ export async function resolvePartnerSession(
       /* swallow */
     });
 
+  // Empty scopes array = legacy key issued before enforcement; grant
+  // all scopes so existing partners aren't surprised. New keys are
+  // expected to carry an explicit scope list.
+  const scopes =
+    apiKey.scopes.length === 0
+      ? new Set<string>(ALL_SCOPES)
+      : new Set<string>(apiKey.scopes);
+
   return {
     partnerId: apiKey.partner.id,
     partnerName: apiKey.partner.name,
@@ -97,7 +151,27 @@ export async function resolvePartnerSession(
     organizationIds: new Set(
       apiKey.partner.organizationLinks.map((l) => l.organizationId),
     ),
+    scopes,
   };
+}
+
+/**
+ * Return a 403 if the session doesn't carry the requested scope.
+ * Returns null when the scope is present so callers can `return
+ * requireScope(s, "insurance:read") ?? continue` cleanly.
+ */
+export function requireScope(
+  session: PartnerSession,
+  scope: Scope,
+): NextResponse | null {
+  if (session.scopes.has(scope)) return null;
+  return NextResponse.json(
+    {
+      error: "INSUFFICIENT_SCOPE",
+      detail: `This API key does not have the '${scope}' scope.`,
+    },
+    { status: 403 },
+  );
 }
 
 /** Convenience: standard error envelope used by every /v1 route. */

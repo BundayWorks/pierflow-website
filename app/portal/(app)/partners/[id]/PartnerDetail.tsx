@@ -16,6 +16,7 @@ import {
   rejectSandbox,
   approveProduction,
   rejectProduction,
+  setPartnerProducts,
 } from "../actions";
 
 type PartnerInfo = {
@@ -26,6 +27,7 @@ type PartnerInfo = {
   websiteUrl: string | null;
   country: string | null;
   accessStatus: string;
+  consumesProducts: string[];
   primaryUseCase: string | null;
   expectedVolume: string | null;
   timeline: string | null;
@@ -40,6 +42,8 @@ type ApiKeyRow = {
   id: string;
   last4: string;
   label: string | null;
+  env: string;
+  scopes: string[];
   createdAt: string;
   revokedAt: string | null;
   lastUsedAt: string | null;
@@ -224,6 +228,21 @@ export default function PartnerDetail({
           <Row label="Country">{partner.country ?? "—"}</Row>
         </Section>
 
+        <Section title="Products & scopes">
+          <p className="text-[12px] text-accent-ink/65 leading-[1.55]">
+            Which Pierflow products this partner is approved to consume.
+            Drives the default scope set on every new API key — existing
+            keys keep the scopes they were issued with. Toggle to enable a
+            new product surface for this partner.
+          </p>
+          <div className="mt-3">
+            <ProductsControl
+              partnerId={partner.id}
+              initial={partner.consumesProducts as ("RECORDS" | "INSURANCE")[]}
+            />
+          </div>
+        </Section>
+
         <Section title="People">
           {users.length === 0 ? (
             <p className="text-[13px] text-accent-ink/55">No users yet.</p>
@@ -258,21 +277,53 @@ export default function PartnerDetail({
               No keys issued yet.
             </p>
           ) : (
-            <ul className="space-y-1.5">
+            <ul className="space-y-3">
               {keys.map((k) => (
-                <li
-                  key={k.id}
-                  className="text-[13px] flex items-center justify-between gap-3"
-                >
-                  <span className="font-mono text-[12px] text-accent-ink">
-                    pf_test_sk_…{k.last4}{" "}
-                    <span className="text-[11px] text-accent-ink/55 font-sans">
+                <li key={k.id} className="text-[13px]">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-[12px] text-accent-ink">
+                      pf_{k.env}_sk_…{k.last4}
+                    </span>
+                    <span className="text-[11px] text-accent-ink/55">
                       {k.label ?? "no label"}
                     </span>
-                  </span>
-                  <span className="text-[11px] text-accent-ink/45">
-                    {k.revokedAt ? "revoked" : k.lastUsedAt ? "used" : "unused"}
-                  </span>
+                    <span
+                      className={`text-[10px] uppercase tracking-[0.12em] font-medium px-1.5 py-0.5 rounded-full ${
+                        k.env === "live"
+                          ? "bg-[#fde6e6] text-[#a83232]"
+                          : "bg-[#fff4d4] text-[#7a4a00]"
+                      }`}
+                    >
+                      {k.env === "live" ? "Live" : "Sandbox"}
+                    </span>
+                    {k.revokedAt ? (
+                      <span className="text-[10px] uppercase tracking-[0.12em] font-medium px-1.5 py-0.5 rounded-full bg-black/[0.06] text-accent-ink/55">
+                        Revoked
+                      </span>
+                    ) : null}
+                  </div>
+                  {k.scopes.length > 0 ? (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {k.scopes.map((s) => (
+                        <code
+                          key={s}
+                          className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-card-mint text-accent-emerald"
+                        >
+                          {s}
+                        </code>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="mt-1 inline-block text-[10px] uppercase tracking-[0.1em] px-1.5 py-0.5 rounded-full bg-black/[0.05] text-accent-ink/55">
+                      Legacy — all scopes
+                    </span>
+                  )}
+                  <p className="mt-1 text-[11px] text-accent-ink/45">
+                    {new Date(k.createdAt).toLocaleDateString()}
+                    {k.lastUsedAt
+                      ? ` · last used ${new Date(k.lastUsedAt).toLocaleDateString()}`
+                      : " · never used"}
+                  </p>
                 </li>
               ))}
             </ul>
@@ -648,4 +699,107 @@ function ActionPanel({
 function normalizeUrl(url: string): string {
   if (/^https?:\/\//i.test(url)) return url;
   return `https://${url}`;
+}
+
+/**
+ * Staff-side control for toggling the products this partner consumes.
+ * Local optimistic state; commits on Save. Disables Save while the
+ * current state matches the persisted value.
+ */
+function ProductsControl({
+  partnerId,
+  initial,
+}: {
+  partnerId: string;
+  initial: ("RECORDS" | "INSURANCE")[];
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [products, setProducts] = useState<Set<string>>(new Set(initial));
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  function toggle(key: "RECORDS" | "INSURANCE") {
+    setProducts((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setSavedAt(null);
+  }
+
+  const dirty =
+    products.size !== initial.length ||
+    initial.some((p) => !products.has(p));
+
+  function save() {
+    setError(null);
+    startTransition(async () => {
+      try {
+        const list = Array.from(products) as ("RECORDS" | "INSURANCE")[];
+        await setPartnerProducts({
+          partnerId,
+          consumesProducts: list,
+        });
+        setSavedAt(Date.now());
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save.");
+      }
+    });
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <label className="inline-flex items-center gap-2 text-[13px] text-accent-ink cursor-pointer">
+          <input
+            type="checkbox"
+            checked={products.has("RECORDS")}
+            onChange={() => toggle("RECORDS")}
+            disabled={pending}
+          />
+          <code className="font-mono text-[12px]">RECORDS</code>
+          <span className="text-[12px] text-accent-ink/55">
+            records:read
+          </span>
+        </label>
+        <label className="inline-flex items-center gap-2 text-[13px] text-accent-ink cursor-pointer">
+          <input
+            type="checkbox"
+            checked={products.has("INSURANCE")}
+            onChange={() => toggle("INSURANCE")}
+            disabled={pending}
+          />
+          <code className="font-mono text-[12px]">INSURANCE</code>
+          <span className="text-[12px] text-accent-ink/55">
+            insurance:read + insurance:write
+          </span>
+        </label>
+      </div>
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <button
+          onClick={save}
+          disabled={!dirty || pending || products.size === 0}
+          className="px-3 py-1.5 rounded-md bg-accent-ink text-white text-[12px] font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {pending ? "Saving…" : "Save products"}
+        </button>
+        {savedAt && !dirty ? (
+          <span className="text-[11px] text-accent-emerald">
+            Saved. New keys will use the updated default scopes.
+          </span>
+        ) : null}
+        {products.size === 0 ? (
+          <span className="text-[11px] text-[#a83232]">
+            At least one product must be selected.
+          </span>
+        ) : null}
+      </div>
+      {error ? (
+        <p className="mt-2 text-[11px] text-[#a83232]">{error}</p>
+      ) : null}
+    </div>
+  );
 }

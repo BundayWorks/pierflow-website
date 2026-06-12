@@ -29,9 +29,29 @@ const RETRY_DELAY_MS = 30_000;
 const HTTP_TIMEOUT_MS = 8_000;
 
 export type WebhookEventName =
+  // Records API events
   | "processing_job.completed"
   | "processing_job.failed"
   | "import_package.ready"
+  // Insurance API events — enrollment lifecycle
+  | "hmo_enrollment.created"
+  | "hmo_enrollment.identity_verified"
+  | "hmo_enrollment.identity_rejected"
+  | "hmo_enrollment.payment_received"
+  | "hmo_enrollment.submitted_to_hmo"
+  | "hmo_enrollment.activated"
+  | "hmo_enrollment.hmo_rejected"
+  | "hmo_enrollment.cancelled"
+  | "hmo_enrollment.failed"
+  // Insurance API events — claims lifecycle
+  | "hmo_claim.submitted"
+  | "hmo_claim.under_review"
+  | "hmo_claim.approved"
+  | "hmo_claim.rejected"
+  | "hmo_claim.paid"
+  // HMO network events
+  | "hmo.rate_card.updated"
+  // Catch-all + test
   | "test.ping";
 
 export type WebhookPayload = {

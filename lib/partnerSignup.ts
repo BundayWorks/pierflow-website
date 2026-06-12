@@ -21,6 +21,7 @@ import {
   staffNewPartnerSignupTemplate,
 } from "@/lib/email";
 import type { PartnerType } from "@prisma/client";
+import { productsFor } from "@/lib/onboarding";
 
 function portalUrl(): string {
   const base =
@@ -103,6 +104,7 @@ export async function signupPartner(input: SignupInput): Promise<SignupResult> {
       name: input.company,
       slug,
       type: input.partnerType,
+      consumesProducts: productsFor(input.partnerType),
       websiteUrl: input.websiteUrl?.trim() || null,
       country: (input.country ?? "NG").toUpperCase(),
       primaryUseCase: input.primaryUseCase,

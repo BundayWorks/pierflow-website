@@ -9,8 +9,10 @@ import {
   FileCheck2,
   Users,
   Building2,
+  ShieldPlus,
   Settings,
   Inbox,
+  Scale,
   type LucideIcon,
 } from "lucide-react";
 import Logo from "@/components/shared/Logo";
@@ -39,6 +41,8 @@ const NAV: NavItem[] = [
     icon: Building2,
     badgeKey: "orgsAwaitingReview",
   },
+  { label: "HMO providers", href: "/portal/hmo-providers", icon: ShieldPlus },
+  { label: "Reconciliation", href: "/portal/reconciliation", icon: Scale },
   { label: "Settings", href: "/portal/settings", icon: Settings },
 ];
 

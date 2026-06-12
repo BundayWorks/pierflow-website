@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Pierflow Records API",
-    "description": "End-to-end working set for the Pierflow partner-facing API.\n\n## What's in here\n  1–8 walk the records lifecycle: create a scan batch, upload via signed Cloudinary URL, register an ingest job, poll, list patients, download + acknowledge an import package.\n  9    PartnerPatientLink CRUD — register mappings between Pierflow's patient id and your EMR's id (single, bulk, lookup).\n  10   By-external FHIR shortcut — query Pierflow with **your own** patient id and get back the merged Bundle.\n\nRun the requests in order, or pick 'Run Collection' to fire them top to bottom. Each request's test script auto-populates the next variable (`batch_id`, `job_id`, `patient_id`, `external_id`, …) so you don't copy-paste between steps.\n\n## Setup\n1. Open this collection's Variables tab.\n2. Set `base_url` (default `https://www.pierflow.com`).\n3. Set `api_key` (issue one from `/portal/keys` in your partner portal).\n4. Set `organization_id` to an org you're linked to (see `/portal/organizations`).\n5. Set `sample_image_url` to a publicly reachable image URL — the default points at our hosted mock outpatient card.\n\n## Auth\nEvery request sends `Authorization: Bearer {{api_key}}`. Keys are server-side only — never embed them in mobile or browser code.\n\n## Patient identity\nPierflow's identity model is documented at https://www.pierflow.com/docs/patient-mapping — covers chart folders, duplicate detection, and the partner-link surface this collection exercises.",
+    "name": "Pierflow API",
+    "description": "End-to-end working set for the Pierflow partner-facing API. Two product surfaces:\n\n## Records API (folders 1–10)\n  1–8 walk the records lifecycle: create a scan batch, upload via signed Cloudinary URL, register an ingest job, poll, list patients, download + acknowledge an import package.\n  9    PartnerPatientLink CRUD — register mappings between Pierflow's patient id and your EMR's id.\n  10   By-external FHIR shortcut — query Pierflow with **your own** patient id.\n\n## Insurance API (folders 11–14)\n  11   Plans — browse the catalogue with filters; retrieve one plan.\n  12   Quotes — submit a user profile, get back ranked + priced quotes valid for 24 hours.\n  13   Enrollments — convert a quote into a real HMO policy; confirm payment; cancel.\n  14   HMO Network — list all HMOs with rate cards; opt in/out to control which HMOs appear in Plans + Quotes.\n\nRun the Records folders in order. The Insurance folders run top-to-bottom: Plans populates `plan_id`, Quotes populates `quote_id`, Enrollments uses both. The whole insurance chain can be exercised end-to-end against the sandbox stub connector.\n\n## Setup\n1. Open this collection's Variables tab.\n2. Set `base_url` (default `https://www.pierflow.com`).\n3. Set `api_key` (issue one from `/portal/keys` in your partner portal).\n4. For Records calls, set `organization_id` to an org you're linked to.\n5. For Insurance calls, set `provider_slug` to an HMO you're consuming from (optional).\n\n## Auth\nEvery request sends `Authorization: Bearer {{api_key}}`. Records calls need the `records:read` scope; Insurance calls need `insurance:read`. Legacy keys (empty scopes) are granted all scopes.\n\n## Money\nAll monetary fields are in NGN minor units (kobo). 850000 = ₦8,500. BigInts arrive as strings — parse explicitly.\n\n## Docs\n- Records: https://www.pierflow.com/docs/patient-mapping\n- Plans: https://www.pierflow.com/docs/plans\n- Quotes: https://www.pierflow.com/docs/quotes",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -83,6 +83,36 @@
     {
       "key": "external_id",
       "value": "",
+      "type": "string"
+    },
+    {
+      "key": "provider_slug",
+      "value": "reliance-hmo",
+      "type": "string"
+    },
+    {
+      "key": "plan_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "quote_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "quote_request_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "enrollment_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "fintech_user_ref",
+      "value": "user_pmsmoke_001",
       "type": "string"
     }
   ],
@@ -567,6 +597,478 @@
                   "  const externalSeen = idents.some(i => i.value === pm.collectionVariables.get('external_id'));",
                   "  pm.expect(externalSeen).to.be.true;",
                   "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "11 · Plans",
+      "description": "Browse the HMO plan catalogue. Universal Plan Schema. Requires `insurance:read` scope.",
+      "item": [
+        {
+          "name": "List plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/plans?limit=10&status=ACTIVE",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "plans"],
+              "query": [
+                { "key": "limit", "value": "10" },
+                { "key": "status", "value": "ACTIVE" },
+                {
+                  "key": "scope",
+                  "value": "INDIVIDUAL",
+                  "disabled": true,
+                  "description": "INDIVIDUAL | FAMILY | EMPLOYEE_GROUP | STUDENT | OTHER"
+                },
+                {
+                  "key": "provider_slug",
+                  "value": "{{provider_slug}}",
+                  "disabled": true,
+                  "description": "Restrict to one HMO."
+                },
+                {
+                  "key": "state",
+                  "value": "Lagos",
+                  "disabled": true
+                },
+                {
+                  "key": "max_monthly_premium_ngn",
+                  "value": "1000000",
+                  "disabled": true,
+                  "description": "Kobo. e.g. 1000000 = ₦10,000."
+                },
+                {
+                  "key": "age_in_years",
+                  "value": "28",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Pagination cursor from a previous response."
+                }
+              ]
+            },
+            "description": "List active plans. Cursor-paginated; default page size 50, max 200. Toggle disabled query params to filter."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has items array', () => pm.expect(body.items).to.be.an('array'));",
+                  "if (body.items.length > 0) {",
+                  "  pm.collectionVariables.set('plan_id', body.items[0].id);",
+                  "  console.log('plan_id =', body.items[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retrieve a plan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/plans/{{plan_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "plans", "{{plan_id}}"]
+            },
+            "description": "Single-plan detail. 404 if the plan belongs to a non-ACTIVE provider."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Carries coverage + pricing', () => {",
+                  "  pm.expect(body).to.have.property('coverage');",
+                  "  pm.expect(body).to.have.property('pricing');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "12 · Quotes",
+      "description": "Personalised, time-bound quotes. Frozen pricing + rationale for 24 hours. Requires `insurance:read` scope.",
+      "item": [
+        {
+          "name": "Create quote",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"age_in_years\": 28,\n  \"sex\": \"M\",\n  \"dependents\": 0,\n  \"monthly_budget_ngn\": 1000000,\n  \"state\": \"Lagos\",\n  \"lga\": \"Ikeja\",\n  \"limit\": 5,\n  \"fintech_ref\": \"session_pmsmoke_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/quotes",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "quotes"]
+            },
+            "description": "Submit a minimal user profile, get back ranked + priced quotes. No PII at quote time — BVN/NIN come later at enrollment. Each quote freezes wholesale + markup + member_pays + splits_snapshot so the numbers hold through to settlement."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has request_id + quotes array', () => {",
+                  "  pm.expect(body).to.have.property('request_id');",
+                  "  pm.expect(body.quotes).to.be.an('array');",
+                  "});",
+                  "pm.collectionVariables.set('quote_request_id', body.request_id);",
+                  "if (body.quotes.length > 0) {",
+                  "  pm.collectionVariables.set('quote_id', body.quotes[0].id);",
+                  "  console.log('quote_id =', body.quotes[0].id, '· score =', body.quotes[0].score);",
+                  "  console.log('member_pays_ngn =', body.quotes[0].member_pays_ngn);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retrieve quote (by quote id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/quotes/{{quote_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "quotes", "{{quote_id}}"]
+            },
+            "description": "Returns a single ranked quote. Auto-scoped to the calling partner."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Money fields are strings (BigInt safe)', () => {",
+                  "  pm.expect(body.wholesale_ngn).to.be.a('string');",
+                  "  pm.expect(body.member_pays_ngn).to.be.a('string');",
+                  "});",
+                  "pm.test('Rationale present', () => {",
+                  "  pm.expect(body.rationale).to.have.property('reasons');",
+                  "  pm.expect(body.rationale).to.have.property('warnings');",
+                  "  pm.expect(body.rationale).to.have.property('signals');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retrieve quotes (by request id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/quotes/{{quote_request_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "quotes", "{{quote_request_id}}"]
+            },
+            "description": "Same endpoint as Retrieve quote, but if the id is a quote-request id you get back the full ranked list instead of one quote."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Returns the full quote list', () => pm.expect(body.quotes).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "13 · Enrollments",
+      "description": "The binding action — convert a quote into a real HMO policy. Requires `insurance:write` for POSTs, `insurance:read` for GETs.",
+      "item": [
+        {
+          "name": "Create enrollment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan_id\": \"{{plan_id}}\",\n  \"quote_id\": \"{{quote_id}}\",\n  \"fintech_user_ref\": \"{{fintech_user_ref}}\",\n  \"idempotency_key\": \"enr_{{fintech_user_ref}}_v1\",\n  \"identity\": {\n    \"nin\": \"12345678901\",\n    \"full_name\": \"Adaeze Margaret Nwosu\",\n    \"date_of_birth\": \"1985-03-14\",\n    \"sex\": \"F\",\n    \"phone\": \"+2348012345678\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/enrollments",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "enrollments"]
+            },
+            "description": "Submit enrollment intent. Identity is verified inline; the response carries the disposition. PENDING_PAYMENT until you confirm payment received.\n\n**Sandbox magic names:**\n- `TEST_FAIL` in full_name → identity REJECTED\n- `TEST_SOFT` in full_name → identity SOFT_REVIEW\n- anything else → AUTO_APPROVED at 95\n\n**Idempotency:** repeated calls with the same idempotency_key under the same partner return the existing enrollment for 24h."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 202', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has enrollment + identity', () => {",
+                  "  pm.expect(body).to.have.property('enrollment');",
+                  "  pm.expect(body).to.have.property('identity');",
+                  "});",
+                  "pm.collectionVariables.set('enrollment_id', body.enrollment.id);",
+                  "console.log('enrollment_id =', body.enrollment.id, '· status =', body.enrollment.status);",
+                  "console.log('member_pays_ngn =', body.enrollment.member_pays_ngn);",
+                  "console.log('identity:', body.identity.status, body.identity.confidence + '%');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm payment received",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount_ngn\": \"1000000\",\n  \"payment_ref\": \"wallet_txn_pmsmoke_001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/enrollments/{{enrollment_id}}/payment-received",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "enrollments", "{{enrollment_id}}", "payment-received"]
+            },
+            "description": "Tell Pierflow you've debited the user's wallet. We advance PENDING_PAYMENT → PENDING_HMO → ACTIVE by calling the HMO connector.\n\n**amount_ngn must exactly equal enrollment.member_pays_ngn.** Update the raw body to match the value from the previous step.\n\nIdempotent — calling twice after ACTIVE returns success without re-charging."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Enrollment is now ACTIVE', () => pm.expect(body.enrollment.status).to.equal('ACTIVE'));",
+                  "pm.test('HMO policy id was issued', () => pm.expect(body.enrollment.hmo_policy_id).to.be.a('string'));",
+                  "console.log('hmo_policy_id =', body.enrollment.hmo_policy_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retrieve enrollment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/enrollments/{{enrollment_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "enrollments", "{{enrollment_id}}"]
+            },
+            "description": "Single-enrollment lookup. Auto-scoped to the calling partner."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Carries the frozen splits snapshot', () => {",
+                  "  pm.expect(body.splits_snapshot).to.have.property('lines');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List enrollments by fintech_user_ref",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/enrollments?fintech_user_ref={{fintech_user_ref}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "enrollments"],
+              "query": [
+                { "key": "fintech_user_ref", "value": "{{fintech_user_ref}}" }
+              ]
+            },
+            "description": "Show every enrollment for a user across plans + time. Useful for the fintech's 'my policies' surface."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Returns items array', () => pm.expect(body.items).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel enrollment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"user_requested\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/enrollments/{{enrollment_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "enrollments", "{{enrollment_id}}", "cancel"]
+            },
+            "description": "Terminate the policy. Calls the HMO connector to terminate on their side if a policy was issued. Cannot be undone — re-enrolling requires a fresh POST /v1/enrollments."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Enrollment now CANCELLED', () => pm.expect(body.enrollment.status).to.equal('CANCELLED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "14 · HMO Network",
+      "item": [
+        {
+          "name": "List HMOs + rate cards",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/hmo-providers",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "hmo-providers"]
+            },
+            "description": "Browse every active HMO on the Pierflow network. Each card shows the published FINTECH rate (what you earn per enrollment) and your current opt-in status.\n\nEnable an HMO via the opt-in endpoint below before its plans appear in GET /v1/plans."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has items array', () => pm.expect(body.items).to.be.an('array'));",
+                  "if (body.items.length > 0) {",
+                  "  pm.collectionVariables.set('hmo_slug', body.items[0].provider_slug);",
+                  "  pm.test('First HMO has rate card', () => pm.expect(body.items[0]).to.have.property('lines'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Opt in to HMO",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/hmo-providers/{{hmo_slug}}/opt-in",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "hmo-providers", "{{hmo_slug}}", "opt-in"]
+            },
+            "description": "Accept the published rate card for this HMO. After this call the HMO's plans appear in GET /v1/plans for your API key.\n\nRate card terms are frozen at acceptance. If Pierflow renegotiates with the HMO, you'll receive an hmo.rate_card.updated webhook."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 or 201', () => [200, 201].includes(pm.response.code));",
+                  "const body = pm.response.json();",
+                  "pm.test('Status is activated or already_active', () => ['activated', 'already_active'].includes(body.status));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Opt out of HMO",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/hmo-providers/{{hmo_slug}}/opt-in",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "hmo-providers", "{{hmo_slug}}", "opt-in"]
+            },
+            "description": "Remove opt-in for an HMO. The HMO's plans will no longer appear in GET /v1/plans. In-flight enrollments are unaffected."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Status is opted_out', () => pm.expect(body.status).to.equal('opted_out'));"
                 ]
               }
             }

@@ -1,0 +1,1071 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pierflow Insurance Distribution — Test Guide</title>
+
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 16mm;
+  }
+  body {
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #1d2333;
+    max-width: 100%;
+  }
+  h1 {
+    font-size: 22pt;
+    color: #0f7257;
+    margin: 0 0 0.4em 0;
+    page-break-before: always;
+  }
+  h1:first-of-type { page-break-before: avoid; }
+  h2 {
+    font-size: 15pt;
+    color: #0f7257;
+    margin-top: 1.4em;
+    border-bottom: 1px solid #0f7257;
+    padding-bottom: 4px;
+  }
+  h3 {
+    font-size: 12pt;
+    color: #1d2333;
+    margin-top: 1.2em;
+  }
+  h4 {
+    font-size: 11pt;
+    color: #4a5160;
+    margin-top: 1em;
+  }
+  p, ul, ol { margin: 0.55em 0; }
+  ul, ol { padding-left: 1.4em; }
+  li { margin: 0.15em 0; }
+  code {
+    font-family: "Cascadia Code", "Consolas", "Monaco", monospace;
+    font-size: 9.5pt;
+    background: #f3f4f7;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  pre {
+    background: #f3f4f7;
+    border-left: 3px solid #0f7257;
+    padding: 10px 12px;
+    border-radius: 4px;
+    overflow-x: auto;
+    page-break-inside: avoid;
+  }
+  pre code {
+    background: transparent;
+    padding: 0;
+    font-size: 9pt;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.8em 0;
+    page-break-inside: avoid;
+    font-size: 9.5pt;
+  }
+  th, td {
+    border: 1px solid #d6d9e0;
+    padding: 6px 9px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: #eef5f2;
+    color: #0f7257;
+    font-weight: 600;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid #d6d9e0;
+    margin: 1.5em 0;
+  }
+  blockquote {
+    border-left: 4px solid #0f7257;
+    background: #eef5f2;
+    margin: 1em 0;
+    padding: 8px 14px;
+    color: #1d2333;
+  }
+  /* Avoid orphaned headings */
+  h2, h3, h4 { page-break-after: avoid; }
+  /* Keep table headers with rows */
+  thead { display: table-header-group; }
+  /* Page break heuristics */
+  section, article { page-break-inside: avoid; }
+  /* Cover-page-ish: only the very first h1 + lead paragraphs */
+  body > p:first-of-type strong { color: #0f7257; }
+</style>
+
+</head>
+<body>
+<h1>Pierflow Insurance Distribution — End-to-End Test Guide</h1>
+<p><strong>Chapters 1–4 · Producer-side, Consumer-side, Money-side, Operations</strong>
+<strong>Version 1.0 · 2026-06-08</strong></p>
+<hr>
+<h2>How to use this guide</h2>
+<p>This guide tests every meaningful path through the Pierflow Insurance Distribution platform — from registering an HMO through to an enrolled member, a paid claim, and a balanced ledger. It is designed for three audiences.</p>
+<h3>If you are a non-technical operator</h3>
+<ul>
+<li>Skip <strong>Part 1 (Setup)</strong> unless you are also the person starting the local server.</li>
+<li>Read <strong>Part 2</strong> (UI walkthrough). Work the staff portal and the impersonated partner portal step by step.</li>
+<li>Use <strong>Part 5</strong> (Failure scenarios) when something does not behave as the guide says it should.</li>
+<li>Use <strong>Part 6</strong> (Sign-off checklist) when you are done.</li>
+</ul>
+<h3>If you are a technical QA</h3>
+<ul>
+<li>Read <strong>Part 1</strong> if you are setting up the environment.</li>
+<li>Run <strong>Part 3</strong> (API walkthrough). It uses Postman + curl and mirrors the UI walkthrough at the protocol level.</li>
+<li>Use <strong>Part 4</strong> (Cross-checks) to verify ledger consistency + webhook delivery.</li>
+<li>Use <strong>Part 5</strong> to confirm error paths.</li>
+</ul>
+<h3>If you are the founder doing a self-test</h3>
+<ul>
+<li>Read <strong>Part 0.3</strong> (the system map) first to confirm the mental model.</li>
+<li>Use <strong>Part 6</strong> (Sign-off checklist) as your driving document; it cross-references every section.</li>
+<li>Skim <strong>Part 5</strong> to make sure you remember each magic test string.</li>
+</ul>
+<hr>
+<h2>Part 0 — Orientation</h2>
+<h3>0.1 What this platform does</h3>
+<p>Pierflow Insurance Distribution lets fintech apps embed health insurance from multiple HMOs through a single API. Three groups of people interact with it:</p>
+<ul>
+<li><strong>HMOs</strong> (Reliance, Avon, Hygeia, etc.) supply plans, prices, and member onboarding.</li>
+<li><strong>EMR vendors</strong> push the HMO catalogue into Pierflow and run the connector to the HMO.</li>
+<li><strong>Fintechs</strong> browse the catalogue, quote plans for users, enroll members, debit wallets, and surface claims.</li>
+</ul>
+<p>Pierflow sits in the middle: it stores the catalogue, computes personalised quotes, runs the enrollment lifecycle, instructs settlements, and keeps an independent ledger of every naira.</p>
+<h3>0.2 The four chapters</h3>
+<table>
+<thead>
+<tr>
+<th>Chapter</th>
+<th>Purpose</th>
+<th>Key tables</th>
+<th>Key API</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1 — Producer side</td>
+<td>HMO catalogue, AI-assisted normalisation, contracts, settlement preferences</td>
+<td><code>HmoProvider</code>, <code>HmoPlan</code>, <code>HmoContract</code>, <code>ConnectorMapping</code></td>
+<td><code>POST /v1/hmo-providers/:slug/plans</code></td>
+</tr>
+<tr>
+<td>2 — Consumer side</td>
+<td>Plan browsing, personalised quotes with frozen 24h pricing</td>
+<td><code>HmoQuoteRequest</code>, <code>HmoQuote</code></td>
+<td><code>GET /v1/plans</code>, <code>POST /v1/quotes</code></td>
+</tr>
+<tr>
+<td>3 — Enrollment</td>
+<td>Identity verification, payment orchestration, lifecycle webhooks</td>
+<td><code>HmoEnrollment</code>, <code>IdentityVerification</code></td>
+<td><code>POST /v1/enrollments</code></td>
+</tr>
+<tr>
+<td>4 — Money side</td>
+<td>Internal ledger, daily reconciliation, claims tracking, provider network</td>
+<td><code>LedgerEntry</code>, <code>LedgerDiscrepancy</code>, <code>HmoClaim</code>, <code>HmoNetworkProvider</code></td>
+<td><code>POST /v1/claims</code>, <code>GET /v1/providers</code></td>
+</tr>
+</tbody></table>
+<h3>0.3 The end-to-end flow</h3>
+<p>The test we are about to run walks the full producer → consumer → money chain:</p>
+<ol>
+<li><strong>Producer setup</strong> (Chapter 1): Pierflow staff registers an HMO. The EMR vendor pushes the catalogue. Staff captures a Reliance-style contract.</li>
+<li><strong>Consumer browse + quote</strong> (Chapter 2): A fintech (impersonated by Pierflow staff) calls the catalogue API and submits a user profile. Pierflow returns five ranked, priced quotes with rationale.</li>
+<li><strong>Enrollment</strong> (Chapter 3): The fintech enrolls one user against the top quote. Pierflow verifies identity, freezes the splits snapshot, and waits for payment.</li>
+<li><strong>Payment + settlement</strong> (Chapter 3 + 4): The fintech confirms it debited the user&#39;s wallet and reports per-party credits inline. Pierflow advances the enrollment to ACTIVE, writes both INSTRUCTED and EXECUTED ledger entries, fires webhooks.</li>
+<li><strong>Claim + tracking</strong> (Chapter 4): The member visits a hospital. The fintech files a claim. Pierflow forwards to the HMO connector (stub), polls every 4h until terminal, fires webhooks on each transition.</li>
+<li><strong>Reconciliation</strong> (Chapter 4): Staff opens <code>/portal/reconciliation</code> to verify the ledger has zero discrepancies for the test enrollment.</li>
+</ol>
+<h3>0.4 Terms used throughout</h3>
+<ul>
+<li><strong>kobo</strong> — Nigerian minor unit. 1 naira = 100 kobo. All money in the API is in kobo. ₦8,500 = 850,000 kobo.</li>
+<li><strong>wholesale</strong> — the price the HMO charges Pierflow for a plan. Frozen at quote time.</li>
+<li><strong>markup</strong> — what the platform layer adds on top of wholesale. Frozen at quote time.</li>
+<li><strong>member_pays</strong> — wholesale + markup. What the user&#39;s wallet is debited.</li>
+<li><strong>splits_snapshot</strong> — the per-party breakdown of who receives what slice of member_pays. Frozen at quote time and used as the settlement instruction at enrollment time.</li>
+<li><strong>INSTRUCTED entry</strong> — a row in the ledger saying &quot;Pierflow told the fintech to credit this much to this party.&quot;</li>
+<li><strong>EXECUTED entry</strong> — a row in the ledger saying &quot;the fintech reported it actually credited this much to this party.&quot;</li>
+</ul>
+<hr>
+<h2>Part 1 — Setup (one-time)</h2>
+<p>This is for whoever is running the local server. Skip if someone else has set this up for you and you only need a browser.</p>
+<h3>1.1 Prerequisites</h3>
+<ul>
+<li><strong>Node.js 24 or later</strong>. Confirm with <code>node --version</code>.</li>
+<li><strong>npm</strong> (bundled with Node).</li>
+<li><strong>A running Pierflow Postgres</strong> (Supabase). The connection string in <code>.env.local</code> must work.</li>
+<li><strong>Environment variables</strong> including <code>ANTHROPIC_API_KEY</code> (for AI-assisted plan normalisation, only needed if you test Chapter 1&#39;s mapping wizard), and the standard Pierflow secrets.</li>
+</ul>
+<h3>1.2 Start the server</h3>
+<p>From the project root:</p>
+<pre><code>npm run dev
+</code></pre>
+<p>Expected output:</p>
+<pre><code>▲ Next.js 14.2.35
+- Local:  http://localhost:3000
+- Environments: .env.local
+
+✓ Starting...
+✓ Ready in 3s
+</code></pre>
+<p>If you see <code>Failed to compile</code>, do not proceed. Capture the error and report it.</p>
+<h3>1.3 Sign in as Pierflow staff</h3>
+<ol>
+<li>Open <code>http://localhost:3000/portal</code>.</li>
+<li>You will be redirected to the Clerk sign-in page.</li>
+<li>Sign in with your usual Pierflow Platform email. The address must be in the <code>ADMIN_EMAILS</code> env variable for the staff portal to grant access.</li>
+<li>You should land at the staff dashboard with the left navigation showing: Dashboard, Capture, Review queue, Patients, Partners, Customer orgs, HMO providers, Reconciliation, Settings.</li>
+</ol>
+<p>If the left nav says only Records-related items, your account is not promoted to staff. Verify <code>ADMIN_EMAILS</code> includes the address you signed in with.</p>
+<h3>1.4 Install + open Postman</h3>
+<p>If you intend to run the API walkthrough (Part 3), install <a href="https://www.postman.com/downloads/">Postman</a> and import the collection:</p>
+<ol>
+<li>Open Postman.</li>
+<li><strong>Import</strong> → <strong>File</strong> → select <code>c:\Users\oogunfuye\Documents\Pierflow\public\api\pierflow.postman_collection.json</code>.</li>
+<li>Open the <strong>Variables</strong> tab of the imported collection.</li>
+<li>Set <code>base_url</code> to <code>http://localhost:3000</code>.</li>
+<li>Set <code>api_key</code> to a value we will mint in Part 2.</li>
+</ol>
+<p>You can return to this once you have minted a key.</p>
+<h3>1.5 Connect a webhook receiver (optional but recommended)</h3>
+<p>To observe webhook deliveries:</p>
+<ol>
+<li>Sign up for a free <a href="https://webhook.site/">webhook.site</a> account.</li>
+<li>Copy the unique URL it gives you (looks like <code>https://webhook.site/12345abc-...</code>).</li>
+<li>Keep that tab open. We will register this URL as a partner webhook endpoint in Part 2.5.</li>
+</ol>
+<hr>
+<h2>Part 2 — Non-technical UI walkthrough</h2>
+<p>This part runs the full Chapter 1 → Chapter 4 flow through the staff portal and the impersonated partner portal. No terminals, no code, no Postman. About 45 minutes end to end if everything works.</p>
+<h3>Section 2.1 — Register an HMO</h3>
+<p>You are Pierflow staff. You are onboarding &quot;Reliance HMO&quot; so its plans can be distributed.</p>
+<ol>
+<li>From the staff dashboard, click <strong>HMO providers</strong> in the left nav.</li>
+<li>You should see the HMO providers list page. It may be empty if you have not registered any before.</li>
+<li>Click the <strong>+ New HMO provider</strong> button at the top right.</li>
+<li>Fill the form:<ul>
+<li><strong>Slug</strong>: <code>reliance-hmo</code></li>
+<li><strong>Display name</strong>: <code>Reliance HMO</code></li>
+<li><strong>Registration number</strong> (optional): <code>NAICOM-2026-001</code></li>
+<li><strong>Contact email</strong> (optional): <code>ops@reliancehmo.example</code></li>
+<li><strong>Default settlement mode</strong>: choose <strong>In fintech account</strong> (the cleaner option for our test).</li>
+</ul>
+</li>
+<li>Click <strong>Save</strong>.</li>
+</ol>
+<p><strong>Expected</strong>: You land on <code>/portal/hmo-providers/reliance-hmo</code>. The header shows &quot;Reliance HMO&quot; with a <strong>Pending</strong> chip. The right sidebar shows the slug, contact, settlement preference. The middle of the page is empty under &quot;Plans&quot; and &quot;Contracts&quot; — we have not added either yet.</p>
+<p><strong>Flag this if</strong>: You see an error, the slug field complains about duplicates, or the redirect lands somewhere unexpected.</p>
+<h3>Section 2.2 — Save a plan mapping (AI-assisted normalisation)</h3>
+<p>We will use the mapping wizard to teach Pierflow how to translate Reliance&#39;s native plan format into Pierflow&#39;s Universal Plan Schema. The output of this section is a saved + activated <strong>mapping</strong>, not a plan. Plans get inserted later (Section 2.4 or 3.2) using this mapping.</p>
+<ol>
+<li>Still on <code>/portal/hmo-providers/reliance-hmo</code>, click <strong>Plan mapping</strong> in the action row.</li>
+<li>You land on <code>/portal/hmo-providers/reliance-hmo/mapping</code>. There are three steps shown at the top: <strong>Provide sample</strong>, <strong>Review proposal</strong>, <strong>Activate</strong>.</li>
+<li>In the &quot;Paste a single native plan&quot; text area, paste the following synthetic Reliance plan:</li>
+</ol>
+<pre><code class="language-json">{
+  &quot;plan_id&quot;: &quot;REL-SILVER-IND&quot;,
+  &quot;plan_name&quot;: &quot;Silver Plan&quot;,
+  &quot;scope&quot;: &quot;individual&quot;,
+  &quot;billing&quot;: &quot;monthly&quot;,
+  &quot;individual_monthly_naira&quot;: 8500,
+  &quot;age_bands&quot;: [
+    { &quot;min_age&quot;: 18, &quot;max_age&quot;: 35, &quot;monthly_naira&quot;: 8500 },
+    { &quot;min_age&quot;: 36, &quot;max_age&quot;: 50, &quot;monthly_naira&quot;: 11000 }
+  ],
+  &quot;coverage&quot;: {
+    &quot;outpatient&quot;: { &quot;covered&quot;: true, &quot;limit_naira&quot;: 200000, &quot;co_pay_percent&quot;: 0 },
+    &quot;inpatient&quot;: { &quot;covered&quot;: true, &quot;limit_naira&quot;: 1000000, &quot;co_pay_percent&quot;: 10 },
+    &quot;maternity&quot;: { &quot;covered&quot;: true, &quot;limit_naira&quot;: 300000, &quot;waiting_period_days&quot;: 270 },
+    &quot;dental&quot;: { &quot;covered&quot;: false },
+    &quot;telemedicine&quot;: { &quot;covered&quot;: true, &quot;unlimited&quot;: true }
+  },
+  &quot;exclusions&quot;: [&quot;HIV/AIDS treatment&quot;, &quot;Cosmetic surgery&quot;],
+  &quot;waiting_periods&quot;: { &quot;general_days&quot;: 30, &quot;maternity_days&quot;: 270 }
+}
+</code></pre>
+<ol start="4">
+<li>Click <strong>Propose mapping with AI</strong>. This calls Anthropic Claude Haiku 4.5. Expect 3–8 seconds of latency. The button shows a spinner.</li>
+</ol>
+<p><strong>Expected</strong>: A proposal table appears. Each row maps a Universal Plan Schema field on the left (e.g. <code>external_id</code>) to a JSONPath on the right (<code>plan_id</code>). Each row has a <strong>confidence</strong> percentage. The summary at the top shows &quot;Average confidence: 78%&quot; or similar. Notes from the model explain assumptions (e.g. &quot;naira values were converted to kobo by multiplying by 100&quot;).</p>
+<p><strong>Flag this if</strong>: The request fails (<code>ANTHROPIC_API_KEY</code> is missing), the confidence is below 60% (indicates a bad sample), or any row has empty rationale.</p>
+<ol start="5">
+<li>Click <strong>Activate this mapping</strong>.</li>
+</ol>
+<p><strong>Expected</strong>: The page shows the mapping in <strong>Active</strong> state. There is now a saved <code>ConnectorMapping</code> row that future native catalogue pushes will use to translate.</p>
+<h3>Section 2.3 — Author a contract</h3>
+<p>This is where you tell Pierflow what each party gets paid when a user buys this HMO&#39;s plans.</p>
+<ol>
+<li>From <code>/portal/hmo-providers/reliance-hmo</code>, click <strong>Contracts</strong> in the action row.</li>
+<li>You land on <code>/portal/hmo-providers/reliance-hmo/contracts</code>. Click <strong>+ New contract</strong>.</li>
+<li>The contract wizard has 4 steps: <strong>Mode</strong>, <strong>Parties</strong>, <strong>Terms</strong>, <strong>Review</strong>.</li>
+</ol>
+<h4>Step 1 — Mode</h4>
+<p>You see three cards: &quot;Gross share&quot;, &quot;Wholesale + fixed markup&quot;, &quot;Wholesale + per-party markup&quot;. Read each one-line description. Pick <strong>Wholesale + fixed markup</strong> for our test. Click <strong>Continue</strong>.</p>
+<h4>Step 2 — Parties</h4>
+<p>The wizard pre-fills three rows: Pierflow ₦200, EMR vendor ₦300, Fintech ₦1,000. Every row&#39;s &quot;When&quot; is <strong>Both events</strong> by default.</p>
+<ul>
+<li>Leave all three rows as-is.</li>
+<li>The bottom-right shows the sum of percentage shares. In MARKUP_FIXED mode this is hidden (correct).</li>
+<li>Click <strong>Continue</strong>.</li>
+</ul>
+<h4>Step 3 — Terms</h4>
+<ul>
+<li><strong>Effective from</strong>: today.</li>
+<li><strong>Markup amount</strong>: ₦1,500 (this is the sum of the three flat lines).</li>
+<li><strong>Enrollment fee</strong>: ₦500 (optional one-time fee for our test).</li>
+<li><strong>Enrollment fee goes to</strong>: a new dropdown appears because we set enrollment fee &gt; 0 in a markup mode. Pick <strong>FINTECH</strong> (the fintech keeps the signup fee — common arrangement).</li>
+<li><strong>Remainder bearer</strong>: leave as <strong>FINTECH</strong>.</li>
+<li>Click <strong>Continue</strong>.</li>
+</ul>
+<h4>Step 4 — Review</h4>
+<p>A preview shows what the user pays at various sample wholesale amounts. With wholesale = ₦8,500 and markup = ₦1,500, you should see:</p>
+<table>
+<thead>
+<tr>
+<th>Line</th>
+<th>Amount</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Wholesale (to HMO)</td>
+<td>₦8,500</td>
+</tr>
+<tr>
+<td>+ Markup</td>
+<td>₦1,500</td>
+</tr>
+<tr>
+<td>= Member pays</td>
+<td>₦10,000</td>
+</tr>
+<tr>
+<td>Pierflow</td>
+<td>₦200</td>
+</tr>
+<tr>
+<td>EMR_VENDOR</td>
+<td>₦300</td>
+</tr>
+<tr>
+<td>FINTECH</td>
+<td>₦1,000 (remainder)</td>
+</tr>
+</tbody></table>
+<p>A separate enrollment-fee preview shows the full ₦500 going to FINTECH.</p>
+<ul>
+<li>Click <strong>Activate this contract</strong>.</li>
+</ul>
+<p><strong>Expected</strong>: You return to <code>/portal/hmo-providers/reliance-hmo/contracts</code> and see a contract row in <strong>Active</strong> state.</p>
+<p><strong>Flag this if</strong>: The math does not match the table above, the preview is missing the wholesale + markup header in markup modes, or any row shows &quot;capped (raw ...)&quot; annotations on this clean example.</p>
+<h3>Section 2.4 — Activate the HMO and publish a sample plan</h3>
+<p>Back on <code>/portal/hmo-providers/reliance-hmo</code>, the Pending chip should still be visible.</p>
+<ol>
+<li>Click <strong>Activate</strong> in the top-right. The chip changes to <strong>Active</strong>.</li>
+<li>The Plans section shows an empty state with a <strong>Publish a sample plan</strong> button. Click it.</li>
+<li>Within ~2 seconds, the button reads &quot;Sample plan created&quot; and the page refreshes. The Plans section now lists <strong>Silver Plan (sample)</strong> with a wholesale of ₦8,500 and status ACTIVE.</li>
+</ol>
+<p>This button uses the mapping you activated in Section 2.2 to translate a synthetic Reliance plan from native format into Pierflow&#39;s Universal Plan Schema and inserts it. Re-running the button updates the same plan in place; it&#39;s idempotent and safe to click multiple times.</p>
+<p><strong>Expected</strong>: The Plans count in the right sidebar increments to 1. Clicking the <strong>Silver Plan (sample)</strong> row opens the plan detail page at <code>/portal/hmo-providers/reliance-hmo/plans/{planId}</code>. That page renders the full Universal Plan Schema produced by the AI normalisation: pricing (₦8,500 individual + 4 age bands), the coverage table (outpatient ₦200K, inpatient ₦1M w/ 10% co-pay, maternity ₦300K w/ 270d wait, dental not covered, optical ₦30K, emergency ₦500K, telemedicine unlimited), waiting periods (general 30d, maternity 270d, pre-existing 365d), and three exclusions.</p>
+<p>Use this page to <strong>verify the AI translation is accurate</strong> — every value should reflect the wizard sample you pasted in Section 2.2. The sidebar shows freshness timestamps and a recent activity log (a single &quot;partial update&quot; entry from the publish click).</p>
+<p><strong>Flag this if</strong>: The button shows &quot;Couldn&#39;t publish — usually means there&#39;s no active mapping yet&quot; (go back to Section 2.2 and confirm the mapping is ACTIVE, not DRAFT); the plan publishes but a coverage row shows the wrong limit (the mapping translated incorrectly — Reset the mapping and re-propose); or wholesale is not ₦8,500.</p>
+<h3>Section 2.5 — Register a fintech partner</h3>
+<p>We will simulate a fintech signing up via the public flow.</p>
+<ol>
+<li>Open a new private/incognito browser tab.</li>
+<li>Navigate to <code>http://localhost:3000/get-started</code>.</li>
+<li><strong>Step 1 — Who are you?</strong> Pick <strong>Fintech, bank, or super-app</strong>.</li>
+<li><strong>Step 2 — What are you doing?</strong><ul>
+<li>Primary use case: <strong>Embed HMO health insurance in our app</strong>.</li>
+<li>Expected volume: <strong>1,000 – 10,000 records / month</strong>.</li>
+<li>Timeline: <strong>Integrating in 1–3 months</strong>.</li>
+</ul>
+</li>
+<li><strong>Step 3 — Your details</strong>.<ul>
+<li>Full name: any name.</li>
+<li>Email: use a real Gmail address you can read.</li>
+<li>Company: <strong>Test Fintech</strong>.</li>
+</ul>
+</li>
+<li>Click <strong>Submit application</strong>.</li>
+</ol>
+<p><strong>Expected</strong>: A confirmation screen. Within 1 minute, an email arrives from Pierflow with an invitation link. <strong>Do not click the invitation yet.</strong></p>
+<p><strong>Flag this if</strong>: The email never arrives. Check <code>ADMIN_EMAILS</code> and Gmail credentials in <code>.env.local</code>.</p>
+<p>Now switch back to your staff browser tab.</p>
+<ol start="7">
+<li>In the staff portal, click <strong>Partners</strong> in the left nav.</li>
+<li>The new &quot;Test Fintech&quot; row appears in <strong>Pending sandbox</strong> state with an audience chip.</li>
+<li>Click into the row. You land on <code>/portal/partners/{id}</code>.</li>
+<li>The right sidebar shows: type <strong>FINTECH</strong>, consumes <strong>INSURANCE</strong>, no API keys yet.</li>
+<li>Click <strong>Approve sandbox access</strong> at the top right.</li>
+<li>The Partner now shows <strong>Sandbox</strong> state.</li>
+</ol>
+<h3>Section 2.6 — Impersonate the fintech</h3>
+<p>This is the feature that lets one person test both producer and consumer sides without juggling accounts.</p>
+<ol>
+<li>From the partner detail page, click <strong>View as Test Fintech</strong> at the top.</li>
+<li>The page reloads. A <strong>persistent amber banner</strong> appears at the top: <em>&quot;Viewing portal as Test Fintech. Every action you take is logged as staff_impersonating ({your email}). [End session]&quot;</em></li>
+<li>The left navigation has switched to the <strong>partner</strong> layout: Overview, Organizations, API keys, Webhooks, Usage, Docs.</li>
+</ol>
+<p>You are now acting as the fintech for testing purposes. Every action you take is recorded as <code>staff_impersonating</code> in the audit.</p>
+<h3>Section 2.7 — Mint an API key (as the fintech)</h3>
+<ol>
+<li>Click <strong>API keys</strong> in the left nav.</li>
+<li>Click <strong>+ Generate new key</strong>.</li>
+<li>Pick a label: <code>Test key</code>.</li>
+<li>Click <strong>Generate</strong>.</li>
+</ol>
+<p><strong>Expected</strong>: A modal shows the full key once: <code>pf_test_sk_…</code>. <strong>Copy it now.</strong> Save it somewhere — you cannot view it again. Set this aside for Part 3 (Postman). The key automatically carries <code>insurance:read</code> and <code>insurance:write</code> scopes because the partner consumes the INSURANCE product.</p>
+<p><strong>Flag this if</strong>: The scope chips below the key do not show <code>insurance:read</code> and <code>insurance:write</code>.</p>
+<h3>Section 2.8 — Register a webhook endpoint (as the fintech)</h3>
+<p>If you set up webhook.site in Part 1.5:</p>
+<ol>
+<li>Click <strong>Webhooks</strong> in the left nav.</li>
+<li>Click <strong>+ Register endpoint</strong>.</li>
+<li>URL: paste your webhook.site URL.</li>
+<li>Events: check all <code>hmo_enrollment.*</code> and <code>hmo_claim.*</code> events.</li>
+<li>Click <strong>Register</strong>.</li>
+</ol>
+<p>The endpoint appears in the list with a generated HMAC secret. Keep webhook.site open in another tab so you can watch deliveries arrive.</p>
+<h3>Section 2.9 — End impersonation</h3>
+<p>Click <strong>End session</strong> on the amber banner. You return to <code>/portal/partners</code> as staff. The <code>ImpersonationSession</code> audit row is now closed (you can verify it later with a direct database query if needed).</p>
+<h3>Section 2.10 — Verify the impersonation audit trail</h3>
+<p>The audit trail confirms every staff action during impersonation is attributable.</p>
+<ol>
+<li>Open a DB query tool (Supabase Studio, TablePlus, etc.) against your Pierflow database.</li>
+<li>Run: <code>SELECT id, &quot;staffEmail&quot;, &quot;partnerName&quot;, &quot;startedAt&quot;, &quot;endedAt&quot; FROM impersonation_sessions ORDER BY &quot;startedAt&quot; DESC LIMIT 5;</code></li>
+<li>You should see one row whose <code>endedAt</code> is approximately now, with your staff email and <code>partnerName</code> = <code>Test Fintech</code>.</li>
+</ol>
+<p><strong>Flag this if</strong>: <code>endedAt</code> is null (session never closed), or <code>staffEmail</code> does not match yours.</p>
+<p><strong>Note on Pierflow&#39;s SQL conventions</strong>: tables are <code>snake_case</code> (e.g. <code>impersonation_sessions</code>) but columns are <code>camelCase</code> (e.g. <code>staffEmail</code>). Postgres requires double-quotes around mixed-case identifiers, so all column references in this guide use <code>&quot;camelCase&quot;</code>. Without the quotes, Postgres lower-cases the identifier and the query fails with <code>column &quot;staffemail&quot; does not exist</code>.</p>
+<hr>
+<h2>Part 3 — Technical API walkthrough</h2>
+<p>This part runs the same end-to-end flow as Part 2 but through the API directly. It assumes you have completed sections 2.1, 2.3, 2.4, 2.5, and 2.7 to get a registered HMO, an active contract, and an API key. You will need the <code>pf_test_sk_…</code> API key from section 2.7.</p>
+<p>Open Postman. The relevant folders for this section are <strong>11 · Plans</strong>, <strong>12 · Quotes</strong>, and <strong>13 · Enrollments</strong>. Folders 1–10 are the Records API surface and aren&#39;t exercised here. Run the three insurance folders top-to-bottom; the test scripts in each request auto-populate the variables the next folder needs (<code>plan_id</code> → <code>quote_id</code> → <code>enrollment_id</code>).</p>
+<h3>Section 3.1 — Set Postman variables</h3>
+<p>Open the collection&#39;s Variables tab. Confirm:</p>
+<ul>
+<li><code>base_url</code>: <code>http://localhost:3000</code></li>
+<li><code>api_key</code>: the <code>pf_test_sk_…</code> from section 2.7</li>
+<li><code>provider_slug</code>: <code>reliance-hmo</code></li>
+<li><code>fintech_user_ref</code>: pick anything memorable, e.g. <code>user_test_001</code></li>
+</ul>
+<p>The other variables (<code>plan_id</code>, <code>quote_id</code>, <code>enrollment_id</code>, etc.) will auto-populate as you run requests.</p>
+<h3>Section 3.2 — Push the catalogue</h3>
+<p><strong>Important clarification</strong>: The mapping wizard from Section 2.2 only saves the <em>translation rule</em> — it does not insert any plans. To actually publish a Silver Plan, you need a separate step.</p>
+<p>The real catalogue-push endpoint is <code>POST /v1/hmo-providers/:slug/plans</code>. It&#39;s not exposed in the Postman collection because partners need an explicit <code>PartnerOrganizationLink</code> to the HMO to call it, and the test fintech you minted in Section 2.7 is a <em>consumer</em> of plans, not a publisher. In production, this endpoint is called by an EMR vendor&#39;s connector.</p>
+<p><strong>For testing, use the &quot;Publish a sample plan&quot; button instead.</strong></p>
+<ol>
+<li>Navigate to <strong>HMO providers → Reliance HMO</strong> in the staff portal.</li>
+<li>If the Plans section shows &quot;No plans yet&quot;, click the <strong>Publish a sample plan</strong> button at the bottom of that panel.</li>
+<li>If you&#39;ve already published once and want to add more, click the <strong>Publish a sample plan</strong> chip in the top action row (next to &quot;Contracts&quot;).</li>
+</ol>
+<p>The button uses the active mapping (the one you activated in Section 2.2) to translate a synthetic Silver Plan from EMR-vendor native format into Pierflow&#39;s Universal Plan Schema, then inserts it. It exercises the exact same code path as a real EMR vendor&#39;s catalogue push.</p>
+<p><strong>Expected</strong>: The page refreshes within ~2 seconds and the Plans section shows the <strong>Silver Plan (sample)</strong> with a wholesale of ₦8,500 and status ACTIVE. The button text changes to &quot;Sample plan created&quot; or &quot;Sample plan updated&quot;.</p>
+<p><strong>Flag this if</strong>: The button shows &quot;Couldn&#39;t publish — usually means there&#39;s no active mapping yet&quot; (run Section 2.2 again), or the plan appears but its status is not ACTIVE.</p>
+<p>Once the Silver Plan is visible, the rest of Part 3 will work.</p>
+<h3>Section 3.3 — Browse the catalogue (read-side)</h3>
+<p>Folder <strong>11 · Plans</strong> → <strong>List plans</strong>. Click <strong>Send</strong>.</p>
+<p><strong>Expected (200)</strong>: An <code>items</code> array containing at least one plan. The first item should be Silver Plan with:</p>
+<ul>
+<li><code>id</code> (the same as <code>plan_id</code>)</li>
+<li><code>hmo.slug</code> = <code>reliance-hmo</code></li>
+<li><code>pricing.individual_monthly</code> = <code>850000</code> (kobo)</li>
+<li><code>is_stale</code> = <code>false</code></li>
+</ul>
+<p>Try the filter variants:</p>
+<ul>
+<li><code>Plans → List plans (state filter)</code> — try <code>state=Lagos</code>.</li>
+<li><code>Plans → List plans (budget filter)</code> — pass <code>max_monthly_premium_ngn=1000000</code>. The Silver Plan (₦8,500) should appear.</li>
+<li>Set <code>max_monthly_premium_ngn=500000</code> (₦5,000). The Silver Plan should be filtered out.</li>
+</ul>
+<p><strong>Flag this if</strong>: Filters do not narrow the result set, or <code>last_synced_at</code> is missing.</p>
+<h3>Section 3.4 — Submit a quote</h3>
+<p>Folder <strong>12 · Quotes</strong> → <strong>Create quote</strong>.</p>
+<p>Body:</p>
+<pre><code class="language-json">{
+  &quot;age_in_years&quot;: 28,
+  &quot;sex&quot;: &quot;M&quot;,
+  &quot;dependents&quot;: 0,
+  &quot;monthly_budget_ngn&quot;: 1000000,
+  &quot;state&quot;: &quot;Lagos&quot;,
+  &quot;lga&quot;: &quot;Ikeja&quot;,
+  &quot;limit&quot;: 5,
+  &quot;fintech_ref&quot;: &quot;session_test_001&quot;
+}
+</code></pre>
+<p>Click <strong>Send</strong>.</p>
+<p><strong>Expected (200)</strong>:</p>
+<pre><code class="language-json">{
+  &quot;request_id&quot;: &quot;qreq_...&quot;,
+  &quot;expires_at&quot;: &quot;&lt;24h from now ISO&gt;&quot;,
+  &quot;quotes&quot;: [
+    {
+      &quot;id&quot;: &quot;quote_...&quot;,
+      &quot;plan_id&quot;: &quot;plan_...&quot;,
+      &quot;rank&quot;: 1,
+      &quot;score&quot;: &lt;number between 0.7 and 0.9&gt;,
+      &quot;wholesale_ngn&quot;: &quot;850000&quot;,
+      &quot;markup_ngn&quot;: &quot;150000&quot;,
+      &quot;member_pays_ngn&quot;: &quot;1000000&quot;,
+      &quot;rationale&quot;: {
+        &quot;reasons&quot;: [&quot;Fits your ₦10,000 monthly budget&quot;, ...],
+        &quot;warnings&quot;: [],
+        &quot;signals&quot;: {...}
+      },
+      &quot;contract_version&quot;: 1,
+      &quot;splits_snapshot&quot;: {...},
+      &quot;expires_at&quot;: &quot;&lt;same as top-level&gt;&quot;
+    }
+  ]
+}
+</code></pre>
+<p>The test script auto-populates <code>quote_id</code> and <code>quote_request_id</code>. Inspect the <strong>splits_snapshot</strong> carefully:</p>
+<pre><code class="language-json">{
+  &quot;mode&quot;: &quot;MARKUP_FIXED&quot;,
+  &quot;wholesale_ngn&quot;: &quot;850000&quot;,
+  &quot;markup_ngn&quot;: &quot;150000&quot;,
+  &quot;member_pays_ngn&quot;: &quot;1000000&quot;,
+  &quot;hmo_line&quot;: { &quot;role&quot;: &quot;HMO&quot;, &quot;amount_ngn&quot;: &quot;850000&quot;, &quot;settlement_tag&quot;: null },
+  &quot;lines&quot;: [
+    { &quot;role&quot;: &quot;PIERFLOW&quot;, &quot;amount_ngn&quot;: &quot;20000&quot;, &quot;settlement_tag&quot;: &quot;pierflow:platform_fee&quot;, &quot;is_remainder&quot;: false },
+    { &quot;role&quot;: &quot;EMR_VENDOR&quot;, &quot;amount_ngn&quot;: &quot;30000&quot;, &quot;settlement_tag&quot;: &quot;emr_vendor:default&quot;, &quot;is_remainder&quot;: false },
+    { &quot;role&quot;: &quot;FINTECH&quot;, &quot;amount_ngn&quot;: &quot;100000&quot;, &quot;settlement_tag&quot;: &quot;fintech:self&quot;, &quot;is_remainder&quot;: true }
+  ]
+}
+</code></pre>
+<p><strong>Flag this if</strong>: <code>score</code> is below 0.5 (something is off in personalisation), <code>splits_snapshot.lines</code> is empty, or amounts in <code>lines</code> do not sum to <code>markup_ngn</code>.</p>
+<h3>Section 3.5 — Retrieve the quote</h3>
+<p>Folder <strong>12 · Quotes</strong> → <strong>Retrieve quote (by quote id)</strong>. Click <strong>Send</strong>.</p>
+<p><strong>Expected</strong>: The same payload as the single quote you just received. Money fields are strings (&quot;850000&quot;) for BigInt safety.</p>
+<h3>Section 3.6 — Enroll a member (happy path)</h3>
+<p>Folder <strong>13 · Enrollments</strong> → <strong>Create enrollment</strong>.</p>
+<p>Body (use a fresh <code>idempotency_key</code> to avoid replays):</p>
+<pre><code class="language-json">{
+  &quot;plan_id&quot;: &quot;{{plan_id}}&quot;,
+  &quot;quote_id&quot;: &quot;{{quote_id}}&quot;,
+  &quot;fintech_user_ref&quot;: &quot;{{fintech_user_ref}}&quot;,
+  &quot;idempotency_key&quot;: &quot;enr_test_001&quot;,
+  &quot;identity&quot;: {
+    &quot;nin&quot;: &quot;12345678901&quot;,
+    &quot;full_name&quot;: &quot;Adaeze Margaret Nwosu&quot;,
+    &quot;date_of_birth&quot;: &quot;1995-03-14&quot;,
+    &quot;sex&quot;: &quot;F&quot;,
+    &quot;phone&quot;: &quot;+2348012345678&quot;
+  }
+}
+</code></pre>
+<p>Click <strong>Send</strong>.</p>
+<p><strong>Expected (202)</strong>:</p>
+<pre><code class="language-json">{
+  &quot;enrollment&quot;: {
+    &quot;id&quot;: &quot;enr_...&quot;,
+    &quot;status&quot;: &quot;PENDING_PAYMENT&quot;,
+    &quot;wholesale_ngn&quot;: &quot;850000&quot;,
+    &quot;markup_ngn&quot;: &quot;150000&quot;,
+    &quot;member_pays_ngn&quot;: &quot;1000000&quot;,
+    &quot;splits_snapshot&quot;: {...},
+    &quot;hmo_policy_id&quot;: null
+  },
+  &quot;identity&quot;: {
+    &quot;status&quot;: &quot;AUTO_APPROVED&quot;,
+    &quot;confidence&quot;: 95,
+    &quot;provider&quot;: &quot;STUB&quot;
+  },
+  &quot;idempotent_replay&quot;: false
+}
+</code></pre>
+<p>The test script populates <code>enrollment_id</code>. Two webhooks should arrive at webhook.site within seconds:</p>
+<ul>
+<li><code>hmo_enrollment.created</code></li>
+<li><code>hmo_enrollment.identity_verified</code> (with <code>identity_status: &quot;AUTO_APPROVED&quot;</code>)</li>
+</ul>
+<p><strong>Flag this if</strong>: Status is anything but <code>PENDING_PAYMENT</code>, identity confidence is below 90 for a clean name, or no webhooks arrive within 30 seconds.</p>
+<h3>Section 3.7 — Confirm payment received (with executed credits)</h3>
+<p>Folder <strong>13 · Enrollments</strong> → <strong>Confirm payment received</strong>.</p>
+<p>This step does double duty: it advances the enrollment to ACTIVE <em>and</em> reports the executed credits so the ledger has both sides for reconciliation.</p>
+<p>Body:</p>
+<pre><code class="language-json">{
+  &quot;amount_ngn&quot;: &quot;1000000&quot;,
+  &quot;payment_ref&quot;: &quot;wallet_txn_test_001&quot;,
+  &quot;executed_credits&quot;: [
+    { &quot;role&quot;: &quot;HMO&quot;, &quot;settlement_tag&quot;: null, &quot;amount_ngn&quot;: &quot;850000&quot; },
+    { &quot;role&quot;: &quot;PIERFLOW&quot;, &quot;settlement_tag&quot;: &quot;pierflow:platform_fee&quot;, &quot;amount_ngn&quot;: &quot;20000&quot; },
+    { &quot;role&quot;: &quot;EMR_VENDOR&quot;, &quot;settlement_tag&quot;: &quot;emr_vendor:default&quot;, &quot;amount_ngn&quot;: &quot;30000&quot; },
+    { &quot;role&quot;: &quot;FINTECH&quot;, &quot;settlement_tag&quot;: &quot;fintech:self&quot;, &quot;amount_ngn&quot;: &quot;100000&quot; }
+  ]
+}
+</code></pre>
+<p>Click <strong>Send</strong>.</p>
+<p><strong>Expected (200)</strong>: The enrollment is now <code>ACTIVE</code>, with <code>hmo_policy_id</code> populated by the stub connector (looks like <code>STUB-REL-SILVER-IND-{4 hex chars}</code>).</p>
+<p>Webhook deliveries at webhook.site within 10 seconds:</p>
+<ul>
+<li><code>hmo_enrollment.payment_received</code></li>
+<li><code>hmo_enrollment.submitted_to_hmo</code></li>
+<li><code>hmo_enrollment.activated</code></li>
+</ul>
+<p><strong>Flag this if</strong>: Status is anything but <code>ACTIVE</code>, <code>hmo_policy_id</code> is null, or any of the three webhooks fail to arrive.</p>
+<h3>Section 3.8 — Submit a claim</h3>
+<p>Folder <strong>13 · Enrollments</strong> → (no direct option) → switch to <strong>POST /v1/claims</strong> in the request builder.</p>
+<p>Body:</p>
+<pre><code class="language-json">{
+  &quot;enrollment_id&quot;: &quot;{{enrollment_id}}&quot;,
+  &quot;fintech_user_ref&quot;: &quot;{{fintech_user_ref}}&quot;,
+  &quot;service_date&quot;: &quot;2026-06-08&quot;,
+  &quot;service_type&quot;: &quot;outpatient_visit&quot;,
+  &quot;facility_name&quot;: &quot;Reddington Hospital — Ikeja&quot;,
+  &quot;amount_ngn&quot;: &quot;2500000&quot;,
+  &quot;diagnosis_codes&quot;: [&quot;J45.9&quot;],
+  &quot;procedure_codes&quot;: [],
+  &quot;notes&quot;: &quot;Routine asthma follow-up&quot;,
+  &quot;idempotency_key&quot;: &quot;clm_test_001&quot;
+}
+</code></pre>
+<p>Click <strong>Send</strong>.</p>
+<p><strong>Expected (202)</strong>:</p>
+<pre><code class="language-json">{
+  &quot;claim&quot;: {
+    &quot;id&quot;: &quot;clm_...&quot;,
+    &quot;status&quot;: &quot;PENDING_HMO&quot;,
+    &quot;hmo_claim_id&quot;: &quot;STUB-CLM-{4 hex chars}&quot;,
+    &quot;amount_ngn&quot;: &quot;2500000&quot;
+  },
+  &quot;idempotent_replay&quot;: false
+}
+</code></pre>
+<p>Webhooks arrive: <code>hmo_claim.submitted</code>.</p>
+<h3>Section 3.9 — Watch the claim progress</h3>
+<p>The poll-claims cron normally runs every 4 hours. To exercise it now, hit the cron endpoint manually:</p>
+<pre><code>GET /v1/cron/poll-claims
+Authorization: Bearer &lt;your CRON_SECRET&gt;
+</code></pre>
+<p>Run that request once. Wait 15 seconds. Run it again. Wait 15 seconds. Run it a third time.</p>
+<p><strong>Expected progression</strong>:</p>
+<ul>
+<li>After 1st run: <code>hmo_claim.under_review</code> webhook fires; claim status → <code>UNDER_REVIEW</code>.</li>
+<li>After 2nd run: <code>hmo_claim.approved</code> webhook fires; claim status → <code>APPROVED</code>.</li>
+<li>After 3rd run: <code>hmo_claim.paid</code> webhook fires; claim status → <code>PAID</code>.</li>
+</ul>
+<p>Retrieve the claim to confirm: <code>GET /v1/claims/{{claim_id}}</code>. Expected <code>status: &quot;PAID&quot;</code>.</p>
+<p><strong>Flag this if</strong>: The status does not advance, or a webhook fires twice for the same transition.</p>
+<h3>Section 3.10 — Browse the provider network</h3>
+<p>Folder is yet to be added to Postman in this version; use curl or build the request manually.</p>
+<pre><code>GET /v1/providers?state=Lagos&amp;type=HOSPITAL
+Authorization: Bearer &lt;your api_key&gt;
+</code></pre>
+<p><strong>Expected (200)</strong>: An <code>items</code> array containing at least Reddington (Ikeja) and Lagoon (Victoria Island).</p>
+<pre><code>GET /v1/providers?specialty=cardiology
+</code></pre>
+<p>Should return Reddington, Lagoon, and Abuja National (the three with <code>cardiology</code> in their specialties).</p>
+<hr>
+<h2>Part 4 — Cross-checks</h2>
+<p>This part verifies the money side is consistent and the audit trail is honest.</p>
+<h3>Section 4.1 — Ledger consistency</h3>
+<p>After Section 3.7 (enrollment activated with executed credits), the ledger should have a balanced set for our test enrollment.</p>
+<p>Open your DB query tool and run:</p>
+<pre><code class="language-sql">SELECT
+  &quot;accountId&quot;,
+  kind,
+  &quot;amountNgn&quot;,
+  source
+FROM ledger_entries
+WHERE &quot;correlationId&quot; = &#39;&lt;your enrollment_id from 3.6&gt;&#39;
+ORDER BY kind, &quot;occurredAt&quot;;
+</code></pre>
+<p><strong>Expected</strong>:</p>
+<ul>
+<li>4 rows with <code>kind = &#39;INSTRUCTED&#39;</code> (one per party + a negative user row).</li>
+<li>4 rows with <code>kind = &#39;EXECUTED&#39;</code> (matching).</li>
+<li><code>SUM(&quot;amountNgn&quot;) WHERE kind = &#39;INSTRUCTED&#39;</code> must be exactly 0.</li>
+<li><code>SUM(&quot;amountNgn&quot;) WHERE kind = &#39;EXECUTED&#39;</code> must be exactly 0.</li>
+</ul>
+<p>If either kind does not sum to 0, the ledger is mis-balanced. <strong>Flag this immediately</strong>; this is the single most important invariant in the platform.</p>
+<h3>Section 4.2 — Reconciliation</h3>
+<p>Run the reconciliation cron manually:</p>
+<pre><code>GET /v1/cron/reconcile-settlements
+Authorization: Bearer &lt;your CRON_SECRET&gt;
+</code></pre>
+<p><strong>Expected (200)</strong>:</p>
+<pre><code class="language-json">{
+  &quot;ok&quot;: true,
+  &quot;elapsed_ms&quot;: &lt;number&gt;,
+  &quot;scanned&quot;: &gt;= 1,
+  &quot;balanced&quot;: &gt;= 1,
+  &quot;discrepancies&quot;: 0,
+  &quot;pending&quot;: 0,
+  &quot;errors&quot;: 0
+}
+</code></pre>
+<p>If <code>discrepancies &gt; 0</code>, open <code>/portal/reconciliation</code> in the staff portal to investigate. The Open tab will show the affected enrollment.</p>
+<h3>Section 4.3 — Reconciliation UI</h3>
+<p>In the staff portal, navigate to <strong>Reconciliation</strong> in the left nav.</p>
+<p><strong>Expected</strong>: If everything is healthy, all tabs are empty except possibly the <strong>Resolved</strong> tab (showing your auto-resolved enrollment).</p>
+<p>If a row appears in <strong>Open</strong>, click into it:</p>
+<ul>
+<li>The per-account breakdown table shows Instructed, Executed, Delta for each ledger account.</li>
+<li>A non-zero Delta column highlights the discrepant account in red.</li>
+<li>Action buttons let you Acknowledge, Mark resolved, or Write off.</li>
+<li>A re-reconcile button retries the comparison after you&#39;ve manually intervened.</li>
+</ul>
+<p>To simulate a discrepancy:</p>
+<ol>
+<li>Manually update one ledger entry&#39;s amount in the DB.</li>
+<li>Re-run the cron.</li>
+<li>The enrollment now appears in <strong>Open</strong> with the right delta.</li>
+<li>Reverse the change and re-reconcile; the row should move to <strong>Resolved</strong>.</li>
+</ol>
+<h3>Section 4.4 — Webhook deliveries audit</h3>
+<p>If you set up webhook.site:</p>
+<ul>
+<li>Open the webhook.site tab.</li>
+<li>You should see, in order:<ol>
+<li><code>hmo_enrollment.created</code></li>
+<li><code>hmo_enrollment.identity_verified</code></li>
+<li><code>hmo_enrollment.payment_received</code></li>
+<li><code>hmo_enrollment.submitted_to_hmo</code></li>
+<li><code>hmo_enrollment.activated</code></li>
+<li><code>hmo_claim.submitted</code></li>
+<li><code>hmo_claim.under_review</code></li>
+<li><code>hmo_claim.approved</code></li>
+<li><code>hmo_claim.paid</code></li>
+</ol>
+</li>
+</ul>
+<p>Each delivery carries an <code>X-Pierflow-Signature</code> header. The payload is JSON with <code>event</code>, <code>emitted_at</code>, <code>partner_id</code>, and <code>data</code>.</p>
+<p><strong>Flag this if</strong>: Any event is missing, duplicated, or fires in the wrong order.</p>
+<h3>Section 4.5 — Audit trail review</h3>
+<p>Pierflow stores append-only event logs for every state machine. Verify them:</p>
+<pre><code class="language-sql">SELECT kind, &quot;fromStatus&quot;, &quot;toStatus&quot;, &quot;occurredAt&quot;
+FROM hmo_enrollment_events
+WHERE &quot;enrollmentId&quot; = &#39;&lt;your enrollment_id&gt;&#39;
+ORDER BY &quot;occurredAt&quot;;
+</code></pre>
+<p>Expected events: <code>CREATED</code> → <code>IDENTITY_VERIFIED</code> → <code>PAYMENT_RECEIVED</code> → <code>SUBMITTED_TO_HMO</code> → <code>HMO_APPROVED</code> → <code>ACTIVATED</code>.</p>
+<pre><code class="language-sql">SELECT kind, &quot;fromStatus&quot;, &quot;toStatus&quot;, &quot;occurredAt&quot;
+FROM hmo_claim_events
+WHERE &quot;claimId&quot; = &#39;&lt;your claim_id&gt;&#39;
+ORDER BY &quot;occurredAt&quot;;
+</code></pre>
+<p>Expected events: <code>SUBMITTED</code> → <code>SENT_TO_HMO</code> → <code>STATUS_POLLED</code> (possibly multiple) → <code>UNDER_REVIEW</code> → <code>APPROVED</code> → <code>PAID</code>.</p>
+<hr>
+<h2>Part 5 — Failure scenarios</h2>
+<p>The platform must handle bad input cleanly. Run these to confirm.</p>
+<h3>Section 5.1 — Identity verification rejection</h3>
+<p>Repeat Section 3.6 but use a magic name to force a rejection:</p>
+<pre><code class="language-json">{
+  &quot;plan_id&quot;: &quot;{{plan_id}}&quot;,
+  &quot;fintech_user_ref&quot;: &quot;user_test_002&quot;,
+  &quot;idempotency_key&quot;: &quot;enr_test_002&quot;,
+  &quot;identity&quot;: {
+    &quot;nin&quot;: &quot;12345678901&quot;,
+    &quot;full_name&quot;: &quot;TEST_FAIL synthetic user&quot;,
+    &quot;date_of_birth&quot;: &quot;1995-03-14&quot;
+  }
+}
+</code></pre>
+<p><strong>Expected (422)</strong>:</p>
+<pre><code class="language-json">{
+  &quot;error&quot;: &quot;IDENTITY_REJECTED&quot;,
+  &quot;detail&quot;: &quot;Identity check returned 30% confidence (below 60 threshold).&quot;
+}
+</code></pre>
+<p>Webhook arrives: <code>hmo_enrollment.identity_rejected</code> with <code>enrollment_id: null</code>. No <code>HmoEnrollment</code> row was created (verify with <code>SELECT count(*) FROM hmo_enrollments WHERE &quot;fintechUserRef&quot; = &#39;user_test_002&#39;;</code> → 0).</p>
+<h3>Section 5.2 — Identity soft review</h3>
+<p>Use the other magic name:</p>
+<pre><code class="language-json">{
+  &quot;plan_id&quot;: &quot;{{plan_id}}&quot;,
+  &quot;fintech_user_ref&quot;: &quot;user_test_003&quot;,
+  &quot;idempotency_key&quot;: &quot;enr_test_003&quot;,
+  &quot;identity&quot;: {
+    &quot;nin&quot;: &quot;12345678901&quot;,
+    &quot;full_name&quot;: &quot;TEST_SOFT synthetic user&quot;,
+    &quot;date_of_birth&quot;: &quot;1995-03-14&quot;
+  }
+}
+</code></pre>
+<p><strong>Expected (202)</strong>: Enrollment is created (status = <code>PENDING_PAYMENT</code>) with <code>identity.status = &quot;SOFT_REVIEW&quot;</code> and <code>identity.confidence = 70</code>.</p>
+<p>This path means &quot;policy issued but flagged for manual review by Pierflow ops.&quot;</p>
+<h3>Section 5.3 — Quote expired</h3>
+<p>Quotes expire after 24 hours. To simulate:</p>
+<ol>
+<li>Submit a quote (Section 3.4).</li>
+<li>Manually update its <code>expiresAt</code> to a past timestamp:</li>
+</ol>
+<pre><code class="language-sql">UPDATE hmo_quotes SET &quot;expiresAt&quot; = NOW() - INTERVAL &#39;1 hour&#39; WHERE id = &#39;&lt;your quote_id&gt;&#39;;
+</code></pre>
+<ol start="3">
+<li>Try to enroll using that expired <code>quote_id</code>.</li>
+</ol>
+<p><strong>Expected (404)</strong>:</p>
+<pre><code class="language-json">{
+  &quot;error&quot;: &quot;QUOTE_NOT_FOUND_OR_EXPIRED&quot;,
+  &quot;detail&quot;: &quot;Quote expired at &lt;ISO timestamp&gt;&quot;
+}
+</code></pre>
+<h3>Section 5.4 — Idempotent enrollment replay</h3>
+<p>Run Section 3.6 again with the <strong>same</strong> <code>idempotency_key</code>. <strong>Do not change anything else.</strong></p>
+<p><strong>Expected (202)</strong>: The same enrollment object is returned. The new field <code>idempotent_replay: true</code> indicates the response is a replay. Critically: no new ledger entries, no new webhooks fire.</p>
+<h3>Section 5.5 — Amount mismatch on payment-received</h3>
+<p>Repeat Section 3.7 but send <code>amount_ngn: &quot;999999&quot;</code> (1 kobo less than <code>member_pays_ngn</code>).</p>
+<p><strong>Expected (422)</strong>:</p>
+<pre><code class="language-json">{
+  &quot;error&quot;: &quot;AMOUNT_MISMATCH&quot;,
+  &quot;detail&quot;: &quot;Expected 1000000 kobo, received 999999 kobo.&quot;
+}
+</code></pre>
+<p>The enrollment remains in <code>PENDING_PAYMENT</code>. No state transition.</p>
+<h3>Section 5.6 — Stale data hint</h3>
+<p>The Postman test for <strong>List plans</strong> verifies the <code>is_stale</code> field on each item.</p>
+<p>The synthetic Silver Plan&#39;s <code>staleAfter</code> is 26 hours after the push (we set it on the catalogue ingest endpoint). To simulate stale data:</p>
+<pre><code class="language-sql">UPDATE hmo_plans SET &quot;staleAfter&quot; = NOW() - INTERVAL &#39;1 hour&#39; WHERE id = &#39;&lt;your plan_id&gt;&#39;;
+</code></pre>
+<p>Re-run <strong>GET /v1/plans</strong>. The plan should now have <code>is_stale: true</code>. The plan still appears in the list — but the fintech client is expected to surface a &quot;data may be stale&quot; hint.</p>
+<p>Reset:</p>
+<pre><code class="language-sql">UPDATE hmo_plans SET &quot;staleAfter&quot; = NOW() + INTERVAL &#39;24 hours&#39; WHERE id = &#39;&lt;your plan_id&gt;&#39;;
+</code></pre>
+<h3>Section 5.7 — Wrong scope</h3>
+<p>Mint a second API key, but for the EMR vendor partner (not the fintech). EMR vendor keys carry only <code>records:read</code>. Try to call <code>GET /v1/plans</code> with it.</p>
+<p><strong>Expected (403)</strong>:</p>
+<pre><code class="language-json">{
+  &quot;error&quot;: &quot;INSUFFICIENT_SCOPE&quot;,
+  &quot;detail&quot;: &quot;This API key does not have the &#39;insurance:read&#39; scope.&quot;
+}
+</code></pre>
+<p>This confirms the new scope guard works correctly.</p>
+<hr>
+<h2>Part 6 — Sign-off checklist</h2>
+<p>Run this at the end. Tick each box. If any item fails, do not sign off — return to the relevant section above.</p>
+<h3>Chapter 1 — Producer side</h3>
+<ul>
+<li><input disabled="" type="checkbox"> HMO can be registered in the staff portal</li>
+<li><input disabled="" type="checkbox"> HMO status transitions: Pending → Active</li>
+<li><input disabled="" type="checkbox"> AI mapping wizard returns a proposal with confidence ≥ 70%</li>
+<li><input disabled="" type="checkbox"> Saved mapping can be activated</li>
+<li><input disabled="" type="checkbox"> Native catalogue push translates through the mapping</li>
+<li><input disabled="" type="checkbox"> Contract wizard supports all three modes (Gross share, Markup fixed, Markup from shares)</li>
+<li><input disabled="" type="checkbox"> Markup-mode contract requires enrollment beneficiary when fee &gt; 0</li>
+<li><input disabled="" type="checkbox"> Splits preview is mathematically consistent (parts sum to total)</li>
+</ul>
+<h3>Chapter 2 — Consumer side</h3>
+<ul>
+<li><input disabled="" type="checkbox"> <code>GET /v1/plans</code> returns active plans</li>
+<li><input disabled="" type="checkbox"> Filters narrow correctly (state, max budget, age, scope)</li>
+<li><input disabled="" type="checkbox"> <code>POST /v1/quotes</code> returns top-N ranked quotes</li>
+<li><input disabled="" type="checkbox"> Quote rationale contains both <code>reasons</code> and <code>signals</code></li>
+<li><input disabled="" type="checkbox"> <code>splits_snapshot.lines</code> sums equal <code>markup_ngn</code></li>
+<li><input disabled="" type="checkbox"> Quotes expire after 24h (Section 5.3)</li>
+<li><input disabled="" type="checkbox"> Wrong scope rejected (Section 5.7)</li>
+</ul>
+<h3>Chapter 3 — Enrollment</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Happy path: PENDING_PAYMENT → PENDING_HMO → ACTIVE</li>
+<li><input disabled="" type="checkbox"> Three webhooks fire on the happy path</li>
+<li><input disabled="" type="checkbox"> Identity rejection: no enrollment row, single webhook (Section 5.1)</li>
+<li><input disabled="" type="checkbox"> Identity soft review: enrollment created, identity flagged (Section 5.2)</li>
+<li><input disabled="" type="checkbox"> Idempotency replay returns existing enrollment unchanged (Section 5.4)</li>
+<li><input disabled="" type="checkbox"> Amount mismatch rejected (Section 5.5)</li>
+<li><input disabled="" type="checkbox"> Enrollment cancellation works end to end</li>
+</ul>
+<h3>Chapter 4 — Money side</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Ledger has 8 entries for happy-path enrollment (4 instructed + 4 executed)</li>
+<li><input disabled="" type="checkbox"> Both sums equal 0 kobo</li>
+<li><input disabled="" type="checkbox"> Reconciliation cron returns 0 discrepancies for a balanced enrollment</li>
+<li><input disabled="" type="checkbox"> Manually injected discrepancy surfaces in <code>/portal/reconciliation</code></li>
+<li><input disabled="" type="checkbox"> Claim submission returns PENDING_HMO with stub claim id</li>
+<li><input disabled="" type="checkbox"> Polling cron advances claim through UNDER_REVIEW → APPROVED → PAID</li>
+<li><input disabled="" type="checkbox"> All four claim webhook events fire</li>
+<li><input disabled="" type="checkbox"> <code>GET /v1/providers</code> returns synthetic Lagos / Abuja hospitals</li>
+<li><input disabled="" type="checkbox"> Provider filter by state, type, specialty narrows correctly</li>
+</ul>
+<h3>Cross-cutting</h3>
+<ul>
+<li><input disabled="" type="checkbox"> Impersonation banner is sticky on every page during the session</li>
+<li><input disabled="" type="checkbox"> Impersonation session shows up in <code>impersonation_sessions</code> with non-null <code>ended_at</code></li>
+<li><input disabled="" type="checkbox"> Webhook signatures (<code>X-Pierflow-Signature</code>) are present on every delivery</li>
+<li><input disabled="" type="checkbox"> No <code>console.error</code> lines appear in the server logs during the happy path</li>
+<li><input disabled="" type="checkbox"> Total time for the happy path (Sections 3.2 → 3.7) is under 90 seconds end to end</li>
+</ul>
+<h3>Sign-off</h3>
+<ul>
+<li>Tester name: ___________________________</li>
+<li>Date: ___________________________</li>
+<li>Network used (local / staging / production): ___________________________</li>
+<li>Notes:</li>
+</ul>
+<hr>
+<h2>Appendix A — Sandbox magic strings</h2>
+<table>
+<thead>
+<tr>
+<th>Where</th>
+<th>String</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>identity.full_name</code> on enrollment</td>
+<td>contains <code>TEST_FAIL</code></td>
+<td>Identity rejected (30% confidence)</td>
+</tr>
+<tr>
+<td><code>identity.full_name</code> on enrollment</td>
+<td>contains <code>TEST_SOFT</code></td>
+<td>Identity soft review (70% confidence)</td>
+</tr>
+<tr>
+<td>Any other name</td>
+<td>(default)</td>
+<td>Identity auto-approved (95% confidence)</td>
+</tr>
+<tr>
+<td><code>notes</code> on claim</td>
+<td>contains <code>test_reject</code></td>
+<td>Claim rejected on next poll</td>
+</tr>
+<tr>
+<td><code>notes</code> on claim</td>
+<td>contains <code>test_fast_approve</code></td>
+<td>Claim approved on next poll</td>
+</tr>
+<tr>
+<td><code>notes</code> on claim</td>
+<td>(default)</td>
+<td>Claim walks SUBMITTED → UNDER_REVIEW → APPROVED → PAID across three polls</td>
+</tr>
+</tbody></table>
+<h2>Appendix B — Common errors and remedies</h2>
+<table>
+<thead>
+<tr>
+<th>Error</th>
+<th>Likely cause</th>
+<th>Remedy</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Failed to compile</code> on <code>npm run dev</code></td>
+<td>Schema drift or stale Prisma client</td>
+<td>Re-run <code>npx prisma generate &amp;&amp; npm run dev</code></td>
+</tr>
+<tr>
+<td><code>P1001</code> on Prisma commands</td>
+<td>Network / Supabase pooler unreachable</td>
+<td>Switch network or check Supabase dashboard</td>
+</tr>
+<tr>
+<td><code>INSUFFICIENT_SCOPE</code> 403</td>
+<td>API key was issued before scopes were defaulted</td>
+<td>Mint a new key from <code>/portal/keys</code></td>
+</tr>
+<tr>
+<td>Webhook never arrives</td>
+<td>The webhook endpoint is unreachable or your <code>webhook.site</code> URL expired</td>
+<td>Re-register with a fresh URL</td>
+</tr>
+<tr>
+<td><code>Identity check returned 30%</code> and you did not use magic name</td>
+<td>Stub provider is throwing — check <code>IDENTITY_HASH_SECRET</code> is set</td>
+<td>Set the env var and restart the server</td>
+</tr>
+<tr>
+<td>Mapping wizard returns &quot;No proposal&quot;</td>
+<td><code>ANTHROPIC_API_KEY</code> is missing</td>
+<td>Add to <code>.env.local</code> and restart</td>
+</tr>
+<tr>
+<td>Reconciliation cron 401</td>
+<td><code>CRON_SECRET</code> env var not set</td>
+<td>Set it in <code>.env.local</code>; pass as Bearer token</td>
+</tr>
+</tbody></table>
+<h2>Appendix C — Reference URLs</h2>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>URL</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Staff dashboard</td>
+<td><a href="http://localhost:3000/portal">http://localhost:3000/portal</a></td>
+</tr>
+<tr>
+<td>HMO providers list</td>
+<td><a href="http://localhost:3000/portal/hmo-providers">http://localhost:3000/portal/hmo-providers</a></td>
+</tr>
+<tr>
+<td>Partners inbox</td>
+<td><a href="http://localhost:3000/portal/partners">http://localhost:3000/portal/partners</a></td>
+</tr>
+<tr>
+<td>Reconciliation queue</td>
+<td><a href="http://localhost:3000/portal/reconciliation">http://localhost:3000/portal/reconciliation</a></td>
+</tr>
+<tr>
+<td>Public onboarding</td>
+<td><a href="http://localhost:3000/get-started">http://localhost:3000/get-started</a></td>
+</tr>
+<tr>
+<td>Partner portal (post-login)</td>
+<td><a href="http://localhost:3000/portal/overview">http://localhost:3000/portal/overview</a></td>
+</tr>
+<tr>
+<td>API docs</td>
+<td><a href="http://localhost:3000/docs/quickstart/introduction">http://localhost:3000/docs/quickstart/introduction</a></td>
+</tr>
+<tr>
+<td>Postman collection</td>
+<td><a href="http://localhost:3000/docs/api/postman">http://localhost:3000/docs/api/postman</a></td>
+</tr>
+<tr>
+<td>Reconcile cron</td>
+<td><a href="http://localhost:3000/v1/cron/reconcile-settlements">http://localhost:3000/v1/cron/reconcile-settlements</a></td>
+</tr>
+<tr>
+<td>Poll-claims cron</td>
+<td><a href="http://localhost:3000/v1/cron/poll-claims">http://localhost:3000/v1/cron/poll-claims</a></td>
+</tr>
+</tbody></table>
+<h2>Appendix D — Test data summary</h2>
+<p>For a single happy-path run, the following data is created:</p>
+<ul>
+<li>1 <code>HmoProvider</code> (Reliance HMO)</li>
+<li>1 <code>ConnectorMapping</code> (Active)</li>
+<li>1 <code>HmoPlan</code> (Silver Plan)</li>
+<li>1 <code>HmoContract</code> (Active, MARKUP_FIXED)</li>
+<li>1 <code>Partner</code> (Test Fintech, Sandbox)</li>
+<li>1 <code>PartnerApiKey</code></li>
+<li>1 <code>WebhookEndpoint</code></li>
+<li>1 <code>HmoQuoteRequest</code></li>
+<li>5 <code>HmoQuote</code> rows (top-N from the request)</li>
+<li>1 <code>HmoEnrollment</code> (ACTIVE)</li>
+<li>1 <code>IdentityVerification</code></li>
+<li>6 <code>HmoEnrollmentEvent</code> rows</li>
+<li>8 <code>LedgerEntry</code> rows (4 instructed + 4 executed)</li>
+<li>0 <code>LedgerDiscrepancy</code> rows (balanced)</li>
+<li>1 <code>HmoClaim</code> (PAID)</li>
+<li>4 <code>HmoClaimEvent</code> rows</li>
+<li>≥ 6 <code>HmoNetworkProvider</code> rows (seeded synthetic)</li>
+<li>1 <code>ImpersonationSession</code> (closed)</li>
+<li>9 webhook deliveries</li>
+</ul>
+<p>To clean up for a re-test, use the cleanup script:</p>
+<pre><code>node --env-file=.env.local scripts/cleanup-demo-state.mjs --drop-all-partners --keep-orgs=pierflow-platform
+</code></pre>
+<p>This drops every Partner and resets transient data. The HMO provider, plan, contract, and mapping can be re-used; just register a fresh fintech.</p>
+<hr>
+<p><em>End of guide. Total length: roughly 35 printed pages.</em></p>
+
+</body>
+</html>

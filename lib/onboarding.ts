@@ -24,6 +24,12 @@ export const AUDIENCE_OPTIONS: AudienceOption[] = [
       "You build clinical software and want to ingest digitised records into your system.",
   },
   {
+    type: "FINTECH",
+    label: "Fintech, bank, or super-app",
+    description:
+      "You want to embed HMO health plans inside your app and let users buy + pay from their wallet.",
+  },
+  {
     type: "INSURER",
     label: "Insurer / HMO / Payer",
     description:
@@ -31,7 +37,7 @@ export const AUDIENCE_OPTIONS: AudienceOption[] = [
   },
   {
     type: "ANALYTICS",
-    label: "Health platform, analytics, or fintech",
+    label: "Health platform or analytics",
     description:
       "You aggregate health data for an app, dashboards, underwriting, or risk models.",
   },
@@ -74,6 +80,13 @@ const USE_CASES_BY_TYPE: Record<PartnerType, string[]> = {
     "Underwriting / risk scoring",
     "Other",
   ],
+  FINTECH: [
+    "Embed HMO health insurance in our app",
+    "Compare and rank plans for our users",
+    "Wallet-debit premium collection",
+    "Employer / payroll health benefits",
+    "Other",
+  ],
   GOVERNMENT: [
     "Programme reporting",
     "Disease surveillance",
@@ -87,6 +100,32 @@ const USE_CASES_BY_TYPE: Record<PartnerType, string[]> = {
     "Other",
   ],
 };
+
+/**
+ * Which products this partner type consumes by default. Used to
+ * populate Partner.consumesProducts at signup and to default the
+ * scope set on issued API keys.
+ *
+ * EMR / HMS / EHR vendors might also distribute insurance to their
+ * hospital network — staff can flip them on Insurance later via the
+ * portal, but the default reflects the primary use case.
+ */
+const PRODUCTS_BY_TYPE: Record<PartnerType, ("RECORDS" | "INSURANCE")[]> = {
+  EMR_VENDOR: ["RECORDS"],
+  HMS_VENDOR: ["RECORDS"],
+  EHR_VENDOR: ["RECORDS"],
+  INSURER: ["RECORDS"],
+  ANALYTICS: ["RECORDS"],
+  FINTECH: ["INSURANCE"],
+  GOVERNMENT: ["RECORDS"],
+  OTHER: ["RECORDS"],
+};
+
+export function productsFor(
+  type: PartnerType,
+): ("RECORDS" | "INSURANCE")[] {
+  return PRODUCTS_BY_TYPE[type] ?? ["RECORDS"];
+}
 
 export function useCasesFor(type: PartnerType): string[] {
   return USE_CASES_BY_TYPE[type] ?? USE_CASES_BY_TYPE.OTHER;

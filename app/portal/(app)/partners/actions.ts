@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireStaff } from "@/lib/auth";
-import { generateApiKey } from "@/lib/partnerAuth";
+import { generateApiKey, defaultScopesFor } from "@/lib/partnerAuth";
 import { getOrCreatePlatformOrg } from "@/lib/platformOrg";
 import {
   sendMail,
@@ -82,6 +82,38 @@ export async function getPartner(id: string) {
   });
 }
 
+/* ── Products / scope override ────────────────────────────────── */
+
+const SetProductsInput = z.object({
+  partnerId: z.string().min(1),
+  consumesProducts: z.array(z.enum(["RECORDS", "INSURANCE"])).max(2),
+});
+
+/**
+ * Staff override of which Pierflow products a partner consumes.
+ * Drives the default scope set on any keys issued from this point
+ * forward; existing keys keep the scopes they were issued with.
+ *
+ * Use cases:
+ *   - A FINTECH that also wants the Records API (e.g. they're embedding
+ *     both health insurance and digitised records flows).
+ *   - An EMR vendor that signed up before FINTECH existed but now
+ *     distributes HMO plans too.
+ *   - Correcting a mis-categorised partner.
+ */
+export async function setPartnerProducts(
+  input: z.infer<typeof SetProductsInput>,
+) {
+  await requireStaff();
+  const parsed = SetProductsInput.parse(input);
+  await db.partner.update({
+    where: { id: parsed.partnerId },
+    data: { consumesProducts: parsed.consumesProducts },
+  });
+  revalidatePath(`/portal/partners/${parsed.partnerId}`);
+  return { ok: true };
+}
+
 /* ── Approve sandbox ──────────────────────────────────────────── */
 
 const SandboxDecisionInput = z.object({
@@ -133,7 +165,8 @@ export async function approveSandbox(input: z.infer<typeof SandboxDecisionInput>
         keyHash: hash,
         last4,
         label: "Initial sandbox key",
-        scopes: ["records:read"],
+        scopes: defaultScopesFor(partner.consumesProducts),
+        env: "test",
       },
     });
   });

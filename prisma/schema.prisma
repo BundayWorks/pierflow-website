@@ -98,6 +98,10 @@ model Organization {
   partnerPatientLinks PartnerPatientLink[]
   requestedByPartner  Partner?         @relation("OrgsRequestedByPartner", fields: [requestedByPartnerId], references: [id])
 
+  // Optional insurance role — populated when this Organization is an HMO
+  // registered for distribution through Pierflow's insurance product.
+  hmoProvider         HmoProvider?
+
   @@index([type])
   @@index([isActive])
   @@index([accessStatus])
@@ -198,7 +202,17 @@ enum PartnerType {
   INSURER
   GOVERNMENT
   ANALYTICS
+  FINTECH
   OTHER
+}
+
+// Which Pierflow products this partner consumes. Drives API key
+// scope defaults, portal navigation, and which docs we surface.
+// A partner may consume both (e.g. an EMR vendor who also distributes
+// HMO plans to its hospital network).
+enum PartnerProduct {
+  RECORDS
+  INSURANCE
 }
 
 // Lifecycle of a Partner from sign-up to live access.
@@ -231,6 +245,15 @@ model Partner {
   timeline        String?
   country         String?  @default("NG")
 
+  // Which Pierflow products this partner consumes. Defaults to
+  // [RECORDS] for backwards compatibility with partners onboarded
+  // before this column existed; the get-started flow sets it
+  // explicitly based on the audience the user picks. Drives:
+  //   • Default scopes on issued API keys
+  //   • Which doc-sidebar surfaces are shown to the partner
+  //   • Which portal navigation items appear
+  consumesProducts PartnerProduct[] @default([RECORDS])
+
   accessStatus            PartnerAccessStatus @default(PENDING_SANDBOX)
   sandboxApprovedAt       DateTime?
   sandboxApprovedBy       String?  // Clerk user id of approver
@@ -252,6 +275,15 @@ model Partner {
   agreements          PartnerAgreement[]
   securityAssessment  PartnerSecurityAssessment?
   requestedOrgs       Organization[] @relation("OrgsRequestedByPartner")
+  hmoChannelSettlements HmoProviderChannelSettlement[]
+  hmoQuoteRequests    HmoQuoteRequest[]
+  hmoQuotes           HmoQuote[]
+  identityVerifications IdentityVerification[]
+  hmoEnrollments      HmoEnrollment[]
+  impersonationSessions ImpersonationSession[]
+  ledgerAccounts      LedgerAccount[]
+  hmoClaims           HmoClaim[]
+  hmoAccess           PartnerHmoAccess[]
 
   @@index([accessStatus])
   @@map("partners")
@@ -360,6 +392,12 @@ model PartnerApiKey {
   // Human label set by the partner ("prod", "staging", "ci")
   label        String?
   scopes       String[]  @default([])
+  // Environment tag of the key prefix. "test" = pf_test_sk_*, "live" =
+  // pf_live_sk_*. Live keys are only issued after a Partner has been
+  // explicitly approved for PRODUCTION access. Backfill assumes "test"
+  // for rows created before this column existed — correct in practice
+  // because we hadn't promoted any partner to PRODUCTION yet.
+  env          String    @default("test")
   revokedAt    DateTime?
   lastUsedAt   DateTime?
   createdAt    DateTime  @default(now())
@@ -848,4 +886,1161 @@ model AuditLog {
   @@index([partnerId, occurredAt])
   @@index([actorType, actorId])
   @@map("audit_log")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Insurance distribution — Chapter 1
+// ─────────────────────────────────────────────────────────────────────
+//
+// Pierflow's second product surface: distributing HMO health plans
+// through fintech / HR / bank channels. Pierflow caches a normalised
+// view of each HMO's catalogue and brokers enrollment + settlement,
+// without owning the user's money (the fintech does).
+//
+// Design choices worth remembering:
+//   • HmoProvider is a thin row that points at an existing Organization
+//     of type INSURER. Reuses tenancy, RLS, audit, partner-org gating.
+//   • HmoPlan stores the Universal Plan Schema as JSONB. The plan
+//     details (coverage, pricing, exclusions, waiting periods) evolve
+//     with HMO product changes; rigid columns would mean migrations
+//     every time. Zod validates the shape at the API boundary.
+//   • Freshness: every plan carries lastVerifiedAt + lastSyncedAt and a
+//     soft "stale-after" so the fintech-facing API can return a
+//     confidence stamp. Verify on action (quote lock + enrollment)
+//     hits the connector live; browse uses the cache.
+//   • Commercial terms live in HmoContract + HmoContractParty rows.
+//     Versioned by effectiveFrom date. Splits never silently change
+//     for existing policies; a contract change only applies to new
+//     enrollments after its effective date.
+//   • Money in BigInt minor units (kobo) throughout, matching the rest
+//     of the codebase.
+
+enum HmoPlanScope {
+  INDIVIDUAL
+  FAMILY
+  EMPLOYEE_GROUP
+  STUDENT
+  OTHER
+}
+
+enum HmoPlanStatus {
+  DRAFT
+  ACTIVE
+  WITHDRAWN
+}
+
+enum BillingFrequency {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+// How the HMO wants their share settled to them.
+//   IN_FINTECH_ACCOUNT — HMO opens an account at each fintech; the
+//     fintech credits internally. Cleanest, no external transfer.
+//   EXTERNAL_BANK_SWEEP — fintech sweeps the HMO's share to an
+//     external NUBAN on a schedule (daily / weekly).
+enum HmoSettlementMode {
+  IN_FINTECH_ACCOUNT
+  EXTERNAL_BANK_SWEEP
+}
+
+// Lifecycle for an HMO's onboarding to the platform.
+enum HmoProviderStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+model HmoProvider {
+  id              String              @id @default(cuid())
+  // 1:1 — the Organization is the tenant; HmoProvider is the insurance
+  // role. The Organization must have type = INSURER.
+  organizationId  String              @unique
+  // Publicly addressable slug — used in API paths and dashboards.
+  slug            String              @unique
+  // Display name (may differ from Organization.name for branding).
+  displayName     String
+  registrationNo  String?             // NAICOM / NHIA / other regulatory id
+  contactEmail    String?
+  contactPhone    String?
+  websiteUrl      String?
+  logoAssetId     String?             // Cloudinary public_id
+
+  status          HmoProviderStatus   @default(PENDING)
+  // Defaults at the HMO level — can be overridden per fintech channel.
+  defaultSettlementMode HmoSettlementMode  @default(IN_FINTECH_ACCOUNT)
+  // Optional external NUBAN for EXTERNAL_BANK_SWEEP mode. Per-fintech
+  // overrides live on a future HmoProviderChannelSettlement row.
+  settlementBankName    String?
+  settlementBankAccount String?
+  settlementBankCode    String?       // CBN-issued bank code
+
+  metadata        Json?               // Free-form for fields we haven't formalised
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plans           HmoPlan[]
+  contracts       HmoContract[]
+  mappings        ConnectorMapping[]
+  channelSettlements HmoProviderChannelSettlement[]
+  enrollments     HmoEnrollment[]
+  networkProviders HmoNetworkProvider[]
+  partnerAccess   PartnerHmoAccess[]
+
+  @@index([status])
+  @@map("hmo_providers")
+}
+
+model HmoPlan {
+  id                String           @id @default(cuid())
+  providerId        String
+  // The EMR vendor's / HMO's own stable id for this plan. Used as the
+  // upsert key on bulk publish so re-publishing updates the same row.
+  externalId        String
+  // Display name (e.g. "Silver Plan").
+  name              String
+  scope             HmoPlanScope     @default(INDIVIDUAL)
+  status            HmoPlanStatus    @default(ACTIVE)
+  billingFrequency  BillingFrequency @default(MONTHLY)
+
+  // ── Universal Plan Schema (Zod-validated at write time) ───────────
+  // Shape mirrors the architecture spec §5.1. Stored as JSONB so plan
+  // attributes can evolve without migrations. See lib/insurance/plan-
+  // schema.ts for the canonical type definitions.
+  //
+  // coverage         e.g. { outpatient: { covered, limit, co_pay_percent }, … }
+  // pricing          { individual_monthly, age_bands[], family_rate, employer_discount_percent }
+  // waitingPeriods   { general, maternity, pre_existing }  (days)
+  // exclusions       string[]
+  coverage          Json
+  pricing           Json
+  waitingPeriods    Json?
+  exclusions        Json?
+
+  // ── Freshness ─────────────────────────────────────────────────────
+  // lastSyncedAt   — when the connector last *pushed* this plan to us.
+  // lastVerifiedAt — when the connector last confirmed it's still
+  //                  active and unchanged (live verify call).
+  // staleAfter     — soft TTL. Beyond this the fintech-facing API
+  //                  surfaces a "data may be stale" hint; binding
+  //                  actions (quote lock, enroll) force a verify.
+  lastSyncedAt      DateTime         @default(now())
+  lastVerifiedAt    DateTime?
+  staleAfter        DateTime?
+
+  // Optional effective dates the HMO may put on the plan.
+  effectiveFrom     DateTime?
+  effectiveTo       DateTime?
+
+  metadata          Json?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  provider          HmoProvider      @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  freshnessEvents   HmoPlanFreshnessEvent[]
+  quotes            HmoQuote[]
+  enrollments       HmoEnrollment[]
+  networkProviders  HmoPlanNetworkProvider[]
+
+  // EMR vendor id is unique within a provider; re-publish updates in place.
+  @@unique([providerId, externalId])
+  @@index([providerId, status])
+  @@index([scope, status])
+  @@map("hmo_plans")
+}
+
+// Audit trail for every connector touch — bulk sync, single update,
+// "something changed" webhook, live verify. Lets us answer "when was
+// this plan last confirmed correct?" and "did the HMO push v1.3
+// before or after this user's enrollment?"
+enum HmoPlanFreshnessKind {
+  BULK_SYNC          // Scheduled full catalogue push
+  PARTIAL_UPDATE     // Single-plan upsert
+  CHANGE_NOTIFICATION // "Something changed" webhook from connector
+  LIVE_VERIFY        // Pierflow asked the connector to re-confirm
+  WITHDRAWAL         // Connector marked the plan withdrawn
+}
+
+model HmoPlanFreshnessEvent {
+  id            String                @id @default(cuid())
+  planId        String
+  kind          HmoPlanFreshnessKind
+  // Whether the touch confirmed the plan is unchanged vs revealed a
+  // change. Useful for "stable for N days" stats.
+  changed       Boolean               @default(false)
+  // Optional payload — the diff, the connector's response, etc.
+  detail        Json?
+  occurredAt    DateTime              @default(now())
+
+  plan          HmoPlan               @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId, occurredAt])
+  @@map("hmo_plan_freshness_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Commercial terms — configurable per HMO contract
+// ─────────────────────────────────────────────────────────────────────
+
+enum HmoContractStatus {
+  DRAFT
+  ACTIVE
+  SUPERSEDED      // A newer version is in effect
+  TERMINATED
+}
+
+// How the user-facing price relates to the HMO's published wholesale.
+//   GROSS_SHARE
+//     Historical "splits of a single number" model. The amount fed to
+//     the engine is the user's total premium; the HMO is one party
+//     among others, taking their declared share. Useful for government
+//     / NHIA-style arrangements where the HMO isn't a fixed-price
+//     wholesaler. The contract MUST include an HMO party.
+//
+//   MARKUP_FIXED
+//     The HMO receives exactly the plan's wholesale price. The
+//     contract carries a single negotiated `markupFixedNgn` that is
+//     added on top; only the markup is split among the non-HMO
+//     parties. Contract MUST NOT include an HMO party.
+//
+//   MARKUP_FROM_SHARES
+//     Same wholesale-pass-through behaviour as MARKUP_FIXED, but the
+//     markup amount is computed from contract parties: each party
+//     declares either a flat or a percentage-of-wholesale margin.
+//     Markup = sum of those lines; the user pays wholesale + markup.
+//     Contract MUST NOT include an HMO party.
+enum HmoContractMarkupMode {
+  GROSS_SHARE
+  MARKUP_FIXED
+  MARKUP_FROM_SHARES
+}
+
+// A versioned commercial agreement between Pierflow and an HMO.
+// Old policies stay locked to the contract version they enrolled
+// under; a new version only applies to enrollments after its
+// effectiveFrom date.
+model HmoContract {
+  id              String              @id @default(cuid())
+  providerId      String
+  // Monotonic version number per provider, starting at 1.
+  version         Int
+  status          HmoContractStatus   @default(DRAFT)
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?           // null = open-ended
+
+  // How the user-facing price relates to the HMO's published wholesale.
+  // See HmoContractMarkupMode for the three supported modes.
+  markupMode      HmoContractMarkupMode @default(GROSS_SHARE)
+
+  // Used only when markupMode = MARKUP_FIXED. The single negotiated
+  // markup amount, in NGN minor units (kobo). The split engine adds
+  // this to the plan's wholesale and distributes it among parties.
+  markupFixedNgn  BigInt?
+
+  // Optional enrollment fee on the user side. If set, the user pays
+  // this once at signup *in addition to* their first premium.
+  // If null, there is no separate enrollment fee — first premium only.
+  enrollmentFeeNgn BigInt?
+
+  // Who receives the enrollment fee when it's > 0.
+  // In GROSS_SHARE mode, this is null and parties split the fee using
+  // their enrollment-only / both timing flags (legacy behaviour).
+  // In MARKUP_FIXED / MARKUP_FROM_SHARES modes, the fee goes
+  // entirely to one designated party — typically the fintech, since
+  // they did the customer acquisition. The parties table in those
+  // modes only describes the recurring markup split.
+  enrollmentBeneficiaryRole HmoContractPartyRole?
+
+  // Which party absorbs the residual when caps/floors / rounding leave
+  // unallocated kobo. Default HMO works for GROSS_SHARE; for markup
+  // modes the wizard defaults this to FINTECH (closest to the user).
+  remainderBearer HmoContractPartyRole @default(HMO)
+
+  notes           String?             @db.Text
+  metadata        Json?
+  createdAt       DateTime            @default(now())
+  createdByExternalId String?         // Clerk user id of the staff member
+  updatedAt       DateTime            @updatedAt
+
+  provider        HmoProvider         @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  parties         HmoContractParty[]
+  accessRecords   PartnerHmoAccess[]
+
+  @@unique([providerId, version])
+  @@index([providerId, status])
+  @@map("hmo_contracts")
+}
+
+// The role each party plays on a contract. Variable list per contract
+// — a contract can have any subset, in any combination.
+enum HmoContractPartyRole {
+  HMO
+  PIERFLOW
+  EMR_VENDOR
+  FINTECH
+  BROKER
+  REGULATOR_LEVY
+  REFERRER
+  OTHER
+}
+
+// Flat amount vs percentage of the underlying amount.
+enum HmoContractFeeKind {
+  FLAT
+  PERCENTAGE
+}
+
+// When the party earns their share.
+//   ENROLLMENT_ONLY — taken once from the enrollment fee at signup
+//   RECURRING_ONLY  — taken every billing cycle from the collected premium
+//   BOTH            — both events trigger a payout (most common)
+enum HmoContractFeeTiming {
+  ENROLLMENT_ONLY
+  RECURRING_ONLY
+  BOTH
+}
+
+// A single line item on a contract — "Pierflow gets 6%, min ₦100,
+// max ₦1,000 per cycle, on every premium." One row per party-role
+// per timing, except BOTH which collapses to a single row.
+model HmoContractParty {
+  id              String                @id @default(cuid())
+  contractId      String
+  role            HmoContractPartyRole
+  // Optional display name — useful for OTHER / BROKER / REFERRER
+  // where the role tag alone doesn't say who.
+  displayName     String?
+  // Which Pierflow Partner this party corresponds to, if any.
+  // Null for the HMO (it's not a Partner — it's the HmoProvider /
+  // Organization) and for static roles like REGULATOR_LEVY.
+  partnerId       String?
+
+  kind            HmoContractFeeKind
+  timing          HmoContractFeeTiming
+  // Used when kind = FLAT. Minor units (kobo).
+  amountFlatNgn   BigInt?
+  // Used when kind = PERCENTAGE. 0–10000 = 0%–100% in basis points.
+  // Stored as int basis points to avoid float math.
+  amountBps       Int?
+  // Optional bounds (only meaningful for PERCENTAGE lines).
+  minPerCycleNgn  BigInt?
+  maxPerCycleNgn  BigInt?
+
+  // Settlement destination tag the engine emits so the fintech knows
+  // which internal account to credit. E.g. "hmo:reliance" /
+  // "pierflow:platform_fee" / "emr_vendor:linkhms" / "fintech:self".
+  settlementAccountTag String?
+
+  notes           String?               @db.Text
+  createdAt       DateTime              @default(now())
+
+  contract        HmoContract           @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@index([role])
+  @@index([partnerId])
+  @@map("hmo_contract_parties")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// HMO rate-card opt-in
+// ─────────────────────────────────────────────────────────────────────
+//
+// A fintech must explicitly accept an HMO's published rate card before
+// they can distribute that HMO's plans. One row per (fintech, HMO).
+//
+// Lifecycle:
+//   PENDING_ACCEPTANCE — fintech has seen the rate card but not yet
+//                        clicked Accept. Created by the API on first
+//                        browse; allows the portal to show "pending"
+//                        state on the HMO Network page.
+//   ACTIVE             — rate card accepted. The frozen rateCardSnapshot
+//                        records the exact FINTECH party terms at
+//                        acceptance, so if Pierflow renegotiates with
+//                        the HMO, existing enrollments are unaffected.
+//   SUSPENDED          — access revoked by Pierflow staff.
+//
+// Access gate: GET /v1/plans filters to only opted-in (ACTIVE) HMOs
+// for the requesting fintech.
+
+enum PartnerHmoAccessStatus {
+  PENDING_ACCEPTANCE
+  ACTIVE
+  SUSPENDED
+}
+
+model PartnerHmoAccess {
+  id              String                  @id @default(cuid())
+  partnerId       String
+  hmoProviderId   String
+  status          PartnerHmoAccessStatus  @default(PENDING_ACCEPTANCE)
+  acceptedAt      DateTime?
+  // The contract version whose FINTECH party row was in effect at
+  // acceptance. Null until the fintech accepts (status → ACTIVE).
+  contractId      String?
+  // Frozen copy of the FINTECH party line(s) from the contract at
+  // acceptance time. Shape: Array<{ kind, amountBps, amountFlatNgn,
+  // minPerCycleNgn, maxPerCycleNgn, timing }>. Null until accepted.
+  rateCardSnapshot Json?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  partner         Partner                 @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  provider        HmoProvider             @relation(fields: [hmoProviderId], references: [id], onDelete: Cascade)
+  contract        HmoContract?            @relation(fields: [contractId], references: [id])
+
+  @@unique([partnerId, hmoProviderId])
+  @@index([partnerId, status])
+  @@index([hmoProviderId])
+  @@map("partner_hmo_access")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Per-fintech settlement overrides
+// ─────────────────────────────────────────────────────────────────────
+//
+// HmoProvider carries the default settlement preference (mode + bank
+// details). Some HMO-fintech relationships negotiate different terms
+// — e.g. Reliance holds an account at Fintech A directly (no external
+// sweep) but uses external bank sweep for Fintech B.
+//
+// One row per (HMO, fintech Partner). All override fields nullable;
+// nulls mean "inherit the HmoProvider-level default." The settlement
+// instructor reads this table first, falls back to HmoProvider when
+// no row exists.
+//
+// Created lazily — most fintech partners will never have a row here.
+
+// ─────────────────────────────────────────────────────────────────────
+// Insurance distribution — Chapter 2 quotes
+// ─────────────────────────────────────────────────────────────────────
+//
+// HmoQuoteRequest captures a fintech-submitted user profile. We never
+// persist real PII at quote time — only an age bucket, sex, state/LGA,
+// dependent count, monthly budget, and optional self-declared
+// conditions. BVN/NIN come later at enrollment (Chapter 3).
+//
+// HmoQuote is one ranked plan within a quote request. Each row holds
+// the score, rationale, and the wholesale + markup + memberPays math
+// the engine computed at quote time — frozen so the fintech can show
+// the same numbers consistently for 24 hours.
+
+enum HmoQuoteStatus {
+  CREATED      // Returned to the fintech; valid until expiresAt
+  CONVERTED    // A user enrolled on this quote
+  EXPIRED      // expiresAt elapsed without conversion
+}
+
+enum HmoQuoteRequestSex {
+  M
+  F
+  U
+}
+
+model HmoQuoteRequest {
+  id              String              @id @default(cuid())
+  partnerId       String              // The fintech
+  // Coarse age bucket — we don't store DOB at quote time.
+  // Format: "18-25" / "26-35" / "36-50" / "51-65" / "66+".
+  ageBucket       String
+  // Numeric age inside the bucket; used by the engine for age-band
+  // matching. Not exposed back to fintechs (they sent it).
+  ageInYears      Int
+  sex             HmoQuoteRequestSex  @default(U)
+  dependents      Int                 @default(0)
+  // Monthly affordability — null = no budget constraint.
+  monthlyBudgetNgn BigInt?
+  state           String?
+  lga             String?
+  // Comma-separated self-declared condition tokens (e.g. "asthma,diabetes").
+  // Optional and minimal; influences the exclusion-penalty scoring.
+  conditions      String?
+  // The fintech's reference for this user/session, opaque to us.
+  fintechRef      String?
+
+  createdAt       DateTime            @default(now())
+  expiresAt       DateTime            // typically createdAt + 24h
+
+  partner         Partner             @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  quotes          HmoQuote[]
+
+  @@index([partnerId, createdAt])
+  @@index([fintechRef])
+  @@map("hmo_quote_requests")
+}
+
+model HmoQuote {
+  id                  String              @id @default(cuid())
+  quoteRequestId      String
+  planId              String
+  partnerId           String              // Denormalised for indexed lookups
+
+  // ── Ranking ─────────────────────────────────────────────────────
+  // 1 = best fit. Tiebreaker is score, then cheapest member-pays.
+  rank                Int
+  // Composite score 0..1 from the rules-based engine.
+  score               Float
+  // Structured rationale: { reasons: string[], warnings: string[],
+  // signals: Record<string, number> } — the fintech can render this
+  // honestly to the user ("matches your budget", "covers Lagos").
+  rationale           Json
+
+  // ── Frozen pricing at quote time ────────────────────────────────
+  wholesaleNgn        BigInt
+  markupNgn           BigInt
+  memberPaysNgn       BigInt
+  // Per-party settlement breakdown of the markup (or full premium in
+  // gross-share mode). Shape: { role, amount_ngn, settlement_tag }.
+  splitsSnapshot      Json
+  // Snapshot of the contract version used so the settlement layer
+  // can reconcile even if the contract supersedes mid-quote.
+  contractVersion     Int
+
+  status              HmoQuoteStatus      @default(CREATED)
+  expiresAt           DateTime
+  createdAt           DateTime            @default(now())
+
+  request             HmoQuoteRequest     @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  plan                HmoPlan             @relation(fields: [planId], references: [id])
+  partner             Partner             @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  enrollments         HmoEnrollment[]
+
+  @@index([quoteRequestId, rank])
+  @@index([partnerId, status])
+  @@index([planId])
+  @@map("hmo_quotes")
+}
+
+model HmoProviderChannelSettlement {
+  id            String              @id @default(cuid())
+  providerId    String
+  partnerId     String              // The fintech
+
+  // Overrides — null means inherit the HmoProvider default.
+  settlementMode        HmoSettlementMode?
+  settlementBankName    String?
+  settlementBankAccount String?
+  settlementBankCode    String?
+
+  // For IN_FINTECH_ACCOUNT mode, the HMO's account id at the fintech.
+  inFintechAccountId    String?
+
+  notes         String?             @db.Text
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  updatedByExternalId String?
+
+  provider      HmoProvider         @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  partner       Partner             @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, partnerId])
+  @@index([partnerId])
+  @@map("hmo_provider_channel_settlements")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// AI-assisted normalisation — connector mappings
+// ─────────────────────────────────────────────────────────────────────
+//
+// When a new HMO is onboarded, staff feed Pierflow a sample of the
+// HMO's (or EMR vendor's) native plan format. Haiku proposes a
+// JSONPath-based mapping from that native shape into the Universal
+// Plan Schema. Staff reviews; the confirmed mapping is saved as a
+// ConnectorMapping row. The catalogue ingest path reads the ACTIVE
+// mapping at push time and applies it via lib/insurance/normalise.ts.
+//
+// Versioned, like HmoContract: a mapping change creates a new version.
+// The runtime always picks status=ACTIVE; older versions stay for
+// audit ("which template processed last week's catalogue?").
+//
+// Runtime mode: JSONPath template first (cheap, deterministic). On
+// per-plan failure (missing field, new shape), the orchestrator falls
+// back to a per-plan Haiku call so one weird plan doesn't poison the
+// whole push. Both paths emit the same UniversalPlan shape.
+
+enum ConnectorMappingStatus {
+  DRAFT       // Staff is still reviewing the proposal
+  ACTIVE      // Used at runtime
+  SUPERSEDED  // A newer version replaced it
+  ARCHIVED    // Manually retired
+}
+
+model ConnectorMapping {
+  id              String                  @id @default(cuid())
+  providerId      String
+  // Monotonic per provider, starting at 1.
+  version         Int
+  status          ConnectorMappingStatus  @default(DRAFT)
+
+  // ── The proposal/mapping shape ──────────────────────────────────
+  //
+  // sample        — the native plan JSON the proposal was derived from.
+  //                 Kept for audit + future re-runs.
+  // proposal      — Haiku's raw response: proposed UniversalPlan +
+  //                 per-field {jsonPath, confidence, justification}.
+  // template      — the human-confirmed JSONPath template applied at
+  //                 runtime. Shape: { "<universal.plan.field>":
+  //                   { jsonPath: "<dotted/bracketed path>",
+  //                     transform?: "kobo_from_naira" | "iso_date" | ... } }.
+  // notes         — staff notes ("flat 30-day waiting period applied as
+  //                 default since source has nothing").
+  sample          Json
+  proposal        Json
+  template        Json
+  notes           String?                 @db.Text
+
+  // ── Confidence at a glance ──────────────────────────────────────
+  // averageConfidence across all proposed fields (0..1). Helps the
+  // review queue surface which providers need urgent attention.
+  averageConfidence Float?
+  // Number of fields below the soft threshold (0.7 default). The UI
+  // jumps the reviewer to these first.
+  lowConfidenceFields Int                 @default(0)
+
+  // ── Lifecycle ───────────────────────────────────────────────────
+  createdAt         DateTime              @default(now())
+  createdByExternalId String?             // Clerk user id of the staff member
+  reviewedAt        DateTime?
+  reviewedByExternalId String?
+  activatedAt       DateTime?
+  // Optional: stash the model id + prompt-cache key so we can answer
+  // "which Haiku version produced this proposal?" later.
+  modelId           String?
+  promptVersion     String?
+
+  provider          HmoProvider           @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, version])
+  @@index([providerId, status])
+  @@map("connector_mappings")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Insurance distribution — Chapter 3 enrollment + identity
+// ─────────────────────────────────────────────────────────────────────
+//
+// Three new models work together at enrollment time:
+//
+//   IdentityVerification  — audit row per verification attempt.
+//                           Stores hashed NIN/BVN + last-4 only;
+//                           never the plaintext. The encrypted blob
+//                           sits in `encryptedPayload` for the
+//                           identity service to re-read when needed.
+//
+//   HmoEnrollment         — the durable record of a member's policy.
+//                           Lifecycle: CREATED → PENDING_PAYMENT →
+//                           PENDING_HMO → ACTIVE / FAILED / LAPSED /
+//                           CANCELLED. Carries a frozen splits
+//                           snapshot taken at enrollment time so the
+//                           settlement layer can instruct the fintech
+//                           without re-reading the quote.
+//
+//   HmoEnrollmentEvent    — append-only audit trail of every state
+//                           transition + side effect (payment in,
+//                           connector call, webhook fire, …).
+//
+// PII rules (NDPC):
+//   • BVN/NIN are never persisted as plaintext.
+//   • SHA-256 hashes power deduplication + ledger lookups.
+//   • Last-4 is shown in the portal for display.
+//   • An encrypted blob — opaque to the database, keyed by an env
+//     secret — holds the original values for the identity service
+//     to re-verify against NIMC if needed.
+//   • The identity service is the only caller permitted to decrypt.
+
+enum IdentityVerificationStatus {
+  AUTO_APPROVED    // confidence > 85
+  SOFT_REVIEW      // confidence 60-85 — policy issued but pending review
+  REJECTED         // confidence < 60
+  ERROR            // NIMC unreachable / malformed payload
+}
+
+enum IdentityVerificationProvider {
+  STUB             // Sandbox + dev — synthetic confidence
+  NIMC             // Real NIMC API
+  PARTNER_DECLARED // Fintech declared they verified upstream; trust-but-audit
+}
+
+model IdentityVerification {
+  id            String                       @id @default(cuid())
+  partnerId     String
+
+  // ── Identifier identity ─────────────────────────────────────────
+  // We support both NIN and BVN. Each is independently hashed +
+  // last-4'd. encryptedPayload holds the originals.
+  ninHash       String?
+  ninLast4      String?
+  bvnHash       String?
+  bvnLast4      String?
+  encryptedPayload Bytes?                   // AEAD-encrypted JSON blob
+
+  // ── Submitted profile ───────────────────────────────────────────
+  fullName      String
+  dateOfBirth   DateTime
+  sex           String?                     // M | F | U
+
+  // ── Outcome ─────────────────────────────────────────────────────
+  status        IdentityVerificationStatus
+  provider      IdentityVerificationProvider @default(STUB)
+  confidence    Float                       // 0..100
+  // Field-level checks the engine returned. Shape:
+  //   { name: { matched, score }, dateOfBirth: { matched }, sex: { matched } }
+  fieldChecks   Json
+  // Raw response from the verification provider (NIMC etc.). Useful
+  // for audit + dispute resolution.
+  rawResponse   Json?
+  // Feature-flag context — which env this was performed under.
+  environment   String                      // "sandbox" | "production"
+
+  createdAt     DateTime                    @default(now())
+
+  partner       Partner                     @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  enrollments   HmoEnrollment[]
+
+  @@index([partnerId, createdAt])
+  // Hash indexes power "have I verified this person before?" lookups.
+  @@index([ninHash])
+  @@index([bvnHash])
+  @@map("identity_verifications")
+}
+
+enum HmoEnrollmentStatus {
+  CREATED          // fintech submitted; haven't charged yet
+  PENDING_PAYMENT  // awaiting fintech to confirm first premium debit
+  PENDING_HMO      // payment in; we're calling the HMO
+  ACTIVE           // HMO confirmed; member is live
+  FAILED           // HMO rejected the enrollment
+  LAPSED           // premium failed after grace
+  CANCELLED        // user / HMO / fintech terminated
+}
+
+enum HmoEnrollmentEventKind {
+  CREATED
+  PAYMENT_RECEIVED
+  PAYMENT_FAILED
+  IDENTITY_VERIFIED
+  IDENTITY_REJECTED
+  SUBMITTED_TO_HMO
+  HMO_APPROVED
+  HMO_REJECTED
+  ACTIVATED
+  RENEWED
+  LAPSED
+  CANCELLED
+  WEBHOOK_DELIVERED
+  WEBHOOK_FAILED
+}
+
+model HmoEnrollment {
+  id                String                @id @default(cuid())
+
+  // ── Who & what ──────────────────────────────────────────────────
+  partnerId         String                // The fintech
+  providerId        String                // The HMO (denormalised from plan)
+  planId            String
+  quoteId           String?               // The quote the user accepted, if any
+
+  // The fintech's reference for this user. Round-tripped on every
+  // event so the fintech can correlate without our internal ids.
+  fintechUserRef    String
+  // The HMO's native policy id, once issued.
+  hmoPolicyId       String?
+  // The HMO's native member id(s) — primary + dependants.
+  hmoMemberId       String?
+  hmoDependentIds   String[]              @default([])
+
+  // ── Identity ────────────────────────────────────────────────────
+  identityVerificationId String?
+  fullName          String                // Display only — never search by this
+  email             String?
+  phone             String?
+
+  // ── Lifecycle ───────────────────────────────────────────────────
+  status            HmoEnrollmentStatus   @default(CREATED)
+  effectiveFrom     DateTime?
+  effectiveTo       DateTime?
+  cancelledAt       DateTime?
+  cancellationReason String?              @db.Text
+
+  // ── Frozen pricing snapshot ─────────────────────────────────────
+  // Copied from the quote at enrollment time. The fintech is
+  // expected to debit memberPaysNgn and split per splitsSnapshot.
+  wholesaleNgn      BigInt
+  markupNgn         BigInt
+  memberPaysNgn     BigInt
+  // Frozen splits — same shape as HmoQuote.splitsSnapshot. Single
+  // source of truth for the settlement instruction.
+  splitsSnapshot    Json
+  contractVersion   Int
+
+  // ── Idempotency ─────────────────────────────────────────────────
+  // Partner-supplied. Same key within 24h returns the existing row.
+  idempotencyKey    String?
+
+  // ── Pierflow Cover — Medplum FHIR refs (opt-in) ────────────────
+  // Populated by the Cover bridge when syncing to Medplum. Null when
+  // Cover is not configured or sync hasn't run yet.
+  medplumPatientId  String?
+  medplumCoverageId String?
+
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  partner           Partner               @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  provider          HmoProvider           @relation(fields: [providerId], references: [id])
+  plan              HmoPlan               @relation(fields: [planId], references: [id])
+  quote             HmoQuote?             @relation(fields: [quoteId], references: [id])
+  identityVerification IdentityVerification? @relation(fields: [identityVerificationId], references: [id])
+  events            HmoEnrollmentEvent[]
+  ledgerEntries     LedgerEntry[]
+  ledgerDiscrepancies LedgerDiscrepancy[]
+  claims            HmoClaim[]
+
+  @@unique([partnerId, idempotencyKey])
+  @@unique([partnerId, fintechUserRef, planId])
+  @@index([partnerId, status])
+  @@index([providerId, status])
+  @@index([planId])
+  @@map("hmo_enrollments")
+}
+
+model HmoEnrollmentEvent {
+  id            String                  @id @default(cuid())
+  enrollmentId  String
+  kind          HmoEnrollmentEventKind
+  // Free-form detail for the event. e.g. webhook delivery id,
+  // payment reference, HMO error code.
+  detail        Json?
+  // The state transition this event represents, if any.
+  fromStatus    HmoEnrollmentStatus?
+  toStatus      HmoEnrollmentStatus?
+  occurredAt    DateTime                @default(now())
+
+  enrollment    HmoEnrollment           @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([enrollmentId, occurredAt])
+  @@map("hmo_enrollment_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Staff impersonation — append-only audit
+// ─────────────────────────────────────────────────────────────────────
+//
+// Records every staff "View as partner" session. Created on session
+// start, updated with endedAt on session end (or expired by the
+// session TTL). Combined with AuditLog rows tagged
+// actor_type="staff_impersonating", this gives a complete answer to
+// "what did Pierflow staff do on this partner's behalf?" at any
+// point in time.
+
+model ImpersonationSession {
+  id                String   @id @default(cuid())
+  // Clerk user id of the staff member doing the impersonation
+  staffExternalId   String
+  // Staff member's email at session-start time (denormalised so the
+  // audit row survives the OrgMember being deleted/renamed later)
+  staffEmail        String?
+  // The partner being viewed
+  partnerId         String
+  partnerName       String
+  startedAt         DateTime @default(now())
+  endedAt           DateTime?
+  // Forensics
+  ipAddress         String?
+  userAgent         String?   @db.Text
+
+  partner           Partner   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([staffExternalId, startedAt])
+  @@index([partnerId, startedAt])
+  @@map("impersonation_sessions")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Insurance distribution — Chapter 4: Ledger
+// ─────────────────────────────────────────────────────────────────────
+//
+// Pierflow's independent double-entry ledger. Every settlement
+// instruction we issue lands as a set of INSTRUCTED entries (one
+// per recipient, summing to zero per event). When the fintech
+// reports back what they actually credited, those land as EXECUTED
+// entries. Reconciliation compares the two.
+//
+// Account scope is (partner × role × settlement_tag). One account
+// per (fintech, role, tag) tuple — so Reliance has separate
+// accounts at Bankly vs Cowrywise, and Pierflow has separate
+// accounts for platform_fee vs subsidy at each fintech.
+//
+// Invariant: for every correlationId (typically an enrollment id)
+// AND for every kind (INSTRUCTED / EXECUTED), the sum of entries
+// across all accounts is exactly zero. Source of accounting truth.
+
+enum LedgerAccountRole {
+  HMO
+  PIERFLOW
+  EMR_VENDOR
+  FINTECH
+  BROKER
+  REGULATOR_LEVY
+  REFERRER
+  OTHER
+  // The "user wallet" side of every transaction — the debit half.
+  USER
+}
+
+enum LedgerEntryKind {
+  // What Pierflow told the fintech to credit
+  INSTRUCTED
+  // What the fintech reported they actually credited
+  EXECUTED
+  // Manual adjustment by staff (e.g. dispute resolution)
+  ADJUSTMENT
+  // Marker that a discrepancy was reconciled / written off
+  RECONCILED
+}
+
+enum LedgerEntrySource {
+  ENROLLMENT_FIRST_PREMIUM
+  ENROLLMENT_FEE
+  RECURRING_PREMIUM     // future — when collections cron exists
+  CLAIM_PAYOUT          // future
+  MANUAL_ADJUSTMENT
+}
+
+model LedgerAccount {
+  id              String              @id @default(cuid())
+  // Auto-keyed on (partnerId, role, settlementTag). Same tag from
+  // two different fintechs are different accounts because the funds
+  // physically live at different fintechs' ledgers.
+  partnerId       String              // The fintech where the money sits
+  role            LedgerAccountRole
+  settlementTag   String?             // "pierflow:platform_fee", "hmo:reliance" …
+  // Display fields for the staff UI.
+  displayName     String
+
+  createdAt       DateTime            @default(now())
+
+  partner         Partner             @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  entries         LedgerEntry[]
+
+  @@unique([partnerId, role, settlementTag])
+  @@index([role])
+  @@map("ledger_accounts")
+}
+
+model LedgerEntry {
+  id              String              @id @default(cuid())
+  accountId       String
+
+  kind            LedgerEntryKind
+  source          LedgerEntrySource
+  // Signed amount. Credits are positive (party receives), debits are
+  // negative (party pays / user side of the double entry). Per-
+  // correlationId + per-kind, the sum across entries is exactly 0.
+  amountNgn       BigInt
+
+  // Joins back to the underlying business object.
+  correlationId   String              // Typically the enrollment id
+  enrollmentId   String?
+  // Free-form context (payment_ref, claim_id, staff note, etc.)
+  detail          Json?
+
+  occurredAt      DateTime            @default(now())
+
+  account         LedgerAccount       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  enrollment      HmoEnrollment?      @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+
+  @@index([correlationId, kind])
+  @@index([accountId, occurredAt])
+  @@index([enrollmentId])
+  @@map("ledger_entries")
+}
+
+enum LedgerDiscrepancyStatus {
+  OPEN          // newly detected; needs review
+  ACKNOWLEDGED  // staff has seen it but not resolved
+  RESOLVED      // explained + closed (e.g. minor rounding accepted)
+  WRITTEN_OFF   // closed with no further action
+}
+
+model LedgerDiscrepancy {
+  id              String                    @id @default(cuid())
+  correlationId   String                    // Typically the enrollment id
+  enrollmentId    String?
+  // Aggregate net difference in kobo. Positive = instructed > executed
+  // (we expected more than the fintech paid out); negative = the
+  // opposite.
+  deltaNgn        BigInt
+  // Per-account breakdown for the reviewer — { accountId, instructed,
+  // executed, delta }.
+  breakdown       Json
+  status          LedgerDiscrepancyStatus   @default(OPEN)
+  reviewerNotes   String?                   @db.Text
+  resolvedAt      DateTime?
+  resolvedByExternalId String?
+
+  detectedAt      DateTime                  @default(now())
+
+  enrollment      HmoEnrollment?            @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+
+  @@index([status, detectedAt])
+  @@index([enrollmentId])
+  @@map("ledger_discrepancies")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Insurance distribution — Chapter 4: Claims
+// ─────────────────────────────────────────────────────────────────────
+//
+// A fintech submits a claim on behalf of a member. The connector
+// forwards it to the HMO; we poll status every 4h until terminal.
+// No auto-adjudication this pass — we're a pass-through with a
+// durable audit trail and webhook surface for the fintech to react.
+
+enum HmoClaimStatus {
+  SUBMITTED       // Received by Pierflow, not yet sent to HMO
+  PENDING_HMO     // In flight to / awaiting acknowledgement from HMO
+  UNDER_REVIEW    // HMO has it, processing
+  APPROVED        // HMO approved
+  REJECTED        // HMO rejected; rejection_reason populated
+  PAID            // Payment disbursed (to provider or member)
+}
+
+enum HmoClaimEventKind {
+  SUBMITTED
+  SENT_TO_HMO
+  STATUS_POLLED   // periodic poll happened; status may not have changed
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  PAID
+  WEBHOOK_DELIVERED
+}
+
+model HmoClaim {
+  id                String              @id @default(cuid())
+  partnerId         String
+  enrollmentId      String              // The policy this claim is against
+  // Fintech's reference for the user this claim is for (round-tripped
+  // on every event so the fintech doesn't need to map our ids).
+  fintechUserRef    String
+  // The HMO's native claim id, set once submitted.
+  hmoClaimId        String?
+
+  // ── Claim content ──────────────────────────────────────────────
+  serviceDate       DateTime
+  serviceType       String?             // outpatient_visit | inpatient | …
+  facilityName      String?             // free text or matched provider name
+  facilityNetworkProviderId String?     // optional FK to HmoNetworkProvider
+  amountNgn         BigInt              // claimed amount in kobo
+  diagnosisCodes    String[]            @default([])  // ICD-10 typically
+  procedureCodes    String[]            @default([])  // CPT / locally defined
+  notes             String?             @db.Text
+
+  // ── Outcome ────────────────────────────────────────────────────
+  status            HmoClaimStatus      @default(SUBMITTED)
+  approvedAmountNgn BigInt?
+  paidAmountNgn     BigInt?
+  rejectionReason   String?             @db.Text
+
+  // Idempotency on submit
+  idempotencyKey    String?
+
+  // ── Pierflow Cover — Medplum FHIR ref (opt-in) ─────────────────
+  medplumClaimId    String?
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  lastPolledAt      DateTime?
+
+  partner           Partner             @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  enrollment        HmoEnrollment       @relation(fields: [enrollmentId], references: [id])
+  facilityProvider  HmoNetworkProvider? @relation(fields: [facilityNetworkProviderId], references: [id])
+  events            HmoClaimEvent[]
+
+  @@unique([partnerId, idempotencyKey])
+  @@index([partnerId, status])
+  @@index([enrollmentId])
+  @@index([status, lastPolledAt])
+  @@map("hmo_claims")
+}
+
+model HmoClaimEvent {
+  id            String              @id @default(cuid())
+  claimId       String
+  kind          HmoClaimEventKind
+  fromStatus    HmoClaimStatus?
+  toStatus      HmoClaimStatus?
+  detail        Json?
+  occurredAt    DateTime            @default(now())
+
+  claim         HmoClaim            @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([claimId, occurredAt])
+  @@map("hmo_claim_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Insurance distribution — Chapter 4: Provider network
+// ─────────────────────────────────────────────────────────────────────
+//
+// Hospitals / clinics / labs / pharmacies that participate in HMO
+// networks. Seeded from the HMO connector's provider-list endpoint
+// (stub returns synthetic data for now). Used at quote time to
+// upgrade the geographic score and by fintechs to surface
+// "hospitals near you" in their app.
+
+enum HmoNetworkProviderType {
+  HOSPITAL
+  CLINIC
+  LAB
+  PHARMACY
+  OTHER
+}
+
+model HmoNetworkProvider {
+  id              String                     @id @default(cuid())
+  hmoProviderId   String                     // The HMO this provider is in network for
+  // HMO's native id for this facility — upsert key.
+  externalId      String
+  name            String
+  type            HmoNetworkProviderType     @default(HOSPITAL)
+  state           String?
+  lga             String?
+  street          String?
+  latitude        Float?
+  longitude       Float?
+  specialties     String[]                   @default([])
+  contactPhone    String?
+  contactEmail    String?
+  // Optional tier the HMO uses (1 best, 3 basic). Per-HMO meaning.
+  tier            Int?
+
+  isActive        Boolean                    @default(true)
+  lastSyncedAt    DateTime                   @default(now())
+
+  hmoProvider     HmoProvider                @relation(fields: [hmoProviderId], references: [id], onDelete: Cascade)
+  planLinks       HmoPlanNetworkProvider[]
+  claims          HmoClaim[]
+
+  @@unique([hmoProviderId, externalId])
+  @@index([state, lga])
+  @@index([type])
+  @@map("hmo_network_providers")
+}
+
+// Many-to-many join: which plans accept which providers. A plan
+// without any links accepts the HMO's entire active network.
+model HmoPlanNetworkProvider {
+  planId          String
+  networkProviderId String
+
+  plan            HmoPlan             @relation(fields: [planId], references: [id], onDelete: Cascade)
+  networkProvider HmoNetworkProvider  @relation(fields: [networkProviderId], references: [id], onDelete: Cascade)
+
+  @@id([planId, networkProviderId])
+  @@index([networkProviderId])
+  @@map("hmo_plan_network_providers")
 }

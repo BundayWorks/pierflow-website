@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requirePartnerUser } from "@/lib/auth";
-import { generateApiKey } from "@/lib/partnerAuth";
+import { generateApiKey, defaultScopesFor } from "@/lib/partnerAuth";
 
 /* ── List ─────────────────────────────────────────────────────── */
 
@@ -18,6 +18,7 @@ export async function listMyApiKeys() {
       last4: true,
       label: true,
       scopes: true,
+      env: true,
       createdAt: true,
       revokedAt: true,
       lastUsedAt: true,
@@ -50,8 +51,15 @@ export async function createApiKey(input: z.infer<typeof CreateInput>) {
   // Live keys are only available once we've explicitly approved
   // production access. Until then, even a partner with PRODUCTION
   // status issuing new keys here gets a test key.
-  const env = partner.accessStatus === "PRODUCTION" ? "live" : "test";
+  const env: "live" | "test" =
+    partner.accessStatus === "PRODUCTION" ? "live" : "test";
   const { raw, hash, last4 } = generateApiKey(env);
+
+  // Scope set follows the partner's product mix. A FINTECH gets
+  // insurance:read + insurance:write; an EMR vendor gets
+  // records:read. Staff can override later via the staff portal if
+  // a partner needs both surfaces.
+  const scopes = defaultScopesFor(partner.consumesProducts);
 
   await db.partnerApiKey.create({
     data: {
@@ -59,12 +67,13 @@ export async function createApiKey(input: z.infer<typeof CreateInput>) {
       keyHash: hash,
       last4,
       label: parsed.label || "Issued from portal",
-      scopes: ["records:read"],
+      scopes,
+      env,
     },
   });
 
   revalidatePath("/portal/keys");
-  return { rawKey: raw, last4 };
+  return { rawKey: raw, last4, scopes, env };
 }
 
 /* ── Revoke ───────────────────────────────────────────────────── */
